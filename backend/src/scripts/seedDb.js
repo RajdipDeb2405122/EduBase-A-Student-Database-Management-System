@@ -14,7 +14,7 @@ async function seedDatabase() {
   try {
     // Clear existing data
     await pool.query('TRUNCATE TABLE admin_action_log, payment, exam, enrollment, scholarship, student, course, faculty, admin, program, department CASCADE');
-    console.log('✅ Cleared existing data');
+    console.log('Cleared existing data');
 
     // 1. Seed Departments
     await pool.query(`
@@ -25,7 +25,7 @@ async function seedDatabase() {
       ('Civil Engineering', 'Building D, Room 401', '1237'),
       ('Business Administration', 'Building E, Room 501', '1238')
     `);
-    console.log('✅ Seeded departments');
+    console.log('Seeded departments');
 
     // 2. Seed Programs
     await pool.query(`
@@ -37,7 +37,7 @@ async function seedDatabase() {
       (4, 'B.Sc. in Civil Engineering', 'Bachelor', 4, 160.00),
       (5, 'BBA', 'Bachelor', 4, 140.00)
     `);
-    console.log('✅ Seeded programs');
+    console.log('Seeded programs');
 
     // 3. Seed Faculty
     await pool.query(`
@@ -51,7 +51,7 @@ async function seedDatabase() {
       (5, 'Dr. Sultana Parvin', 'sultana@university.edu', 'Professor', '2007'),
       (5, 'Mr. Jabbar Ahmed', 'jabbar@university.edu', 'Lecturer', '2008')
     `);
-    console.log('✅ Seeded faculty');
+    console.log('Seeded faculty');
 
     // 4. Seed Admin (password: admin123)
     const hashedPassword = await bcrypt.hash('admin123', 10);
@@ -61,7 +61,7 @@ async function seedDatabase() {
       ('registrar', $1, 'University Registrar', 'registrar@university.edu', 'registrar', 'active'),
       ('finance', $1, 'Finance Officer', 'finance@university.edu', 'finance', 'active')
     `, [hashedPassword]);
-    console.log('✅ Seeded admin users');
+    console.log('Seeded admin users');
 
     // 5. Seed Courses
     await pool.query(`
@@ -77,7 +77,7 @@ async function seedDatabase() {
       (3, 4, 'EEE101', 'Circuit Theory', 4.00, 1, 'Core', TRUE),
       (6, 7, 'BBA101', 'Principles of Management', 3.00, 1, 'Core', TRUE)
     `);
-    console.log('✅ Seeded courses');
+    console.log('Seeded courses');
 
     // 6. Seed Students
     await pool.query(`
@@ -90,7 +90,7 @@ async function seedDatabase() {
       (3, 4, 1, 'EEE2021001', 'Tanvir Ahmed', 'tanvir@student.edu', '3006', '2001-02-14', '2021-09-01', 'active', 3.10),
       (6, 7, 2, 'BBA2022001', 'Sabina Yasmin', 'sabina@student.edu', '3007', '2002-09-30', '2022-09-01', 'active', 3.60)
     `);
-    console.log('✅ Seeded students');
+    console.log('Seeded students');
 
     // 7. Seed Enrollments
     await pool.query(`
@@ -108,7 +108,7 @@ async function seedDatabase() {
       (6, 9, 1, '2021-2022', 'Fall', 'enrolled'),
       (7, 10, 2, '2022-2023', 'Fall', 'enrolled')
     `);
-    console.log('✅ Seeded enrollments');
+    console.log('Seeded enrollments');
 
     // 8. Seed Exams
     await pool.query(`
@@ -124,7 +124,7 @@ async function seedDatabase() {
       (6, 'Midterm', '2022-11-12', 100.00, 65.00, 'C+', 'Needs improvement'),
       (7, 'Midterm', '2023-04-08', 100.00, 72.00, 'B', 'Satisfactory')
     `);
-    console.log('✅ Seeded exams');
+    console.log('Seeded exams');
 
     // 9. Seed Scholarships
     await pool.query(`
@@ -134,7 +134,7 @@ async function seedDatabase() {
       (4, 'Need-based Grant', 'Financial Aid', 30000.00, '2023-01-10', '2025-12-31', 'active'),
       (7, 'Merit Scholarship', 'Academic Excellence', 40000.00, '2023-01-15', '2024-12-31', 'active')
     `);
-    console.log('✅ Seeded scholarships');
+    console.log('Seeded scholarships');
 
     // 10. Seed Payments
     await pool.query(`
@@ -149,7 +149,7 @@ async function seedDatabase() {
       (6, '2021-2022', 'Fall', 'Tuition Fee', 45000.00, '2021-08-27', 'paid'),
       (7, '2022-2023', 'Fall', 'Tuition Fee', 40000.00, '2022-08-29', 'paid')
     `);
-    console.log('✅ Seeded payments');
+    console.log('Seeded payments');
 
     // 11. Seed Admin Action Logs
     await pool.query(`
@@ -160,16 +160,16 @@ async function seedDatabase() {
       (2, 'student', 5, 'VERIFY', NULL, 'Student verified'),
       (1, 'enrollment', 10, 'AUTHORIZE', NULL, 'Enrollment authorized')
     `);
-    console.log('✅ Seeded admin action logs');
+    console.log('Seeded admin action logs');
 
-    console.log('\n🎉 Database seeding completed successfully!');
-    console.log('\n📋 Default Admin Credentials:');
+    console.log('\n Database seeding completed successfully!');
+    console.log('\n Default Admin Credentials:');
     console.log('   Username: admin    | Password: admin123');
     console.log('   Username: registrar | Password: admin123');
     console.log('   Username: finance   | Password: admin123');
 
   } catch (err) {
-    console.error('❌ Seeding failed:', err.message);
+    console.error('Seeding failed:', err.message);
     throw err;
   } finally {
     await pool.end();

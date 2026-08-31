@@ -63,14 +63,15 @@ router.put('/:id/approve', auth, async (req, res) => {
     const request = requestResult.rows[0];
 
     // Create the student
-    const studentResult = await pool.query(
-      `INSERT INTO student (program_id, advisor_id, verified_by_admin_id, registration_no, 
-        full_name, email, phone, date_of_birth, admission_date, current_status, current_cgpa)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, 'active', 0.00) RETURNING *`,
-      [request.program_id, advisor_id || null, req.admin.admin_id, 
-       request.registration_no, request.full_name, request.email, 
-       request.phone, request.date_of_birth]
-    );
+    // In the approve function, update the INSERT to include password_hash:
+const studentResult = await pool.query(
+  `INSERT INTO student (program_id, advisor_id, verified_by_admin_id, registration_no, 
+    full_name, email, phone, date_of_birth, admission_date, current_status, current_cgpa, password_hash)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, 'active', 0.00, $9) RETURNING *`,
+  [request.program_id, advisor_id || null, req.admin.admin_id, 
+   request.registration_no, request.full_name, request.email, 
+   request.phone, request.date_of_birth, request.password_hash]
+);
 
     // Update request status
     await pool.query(

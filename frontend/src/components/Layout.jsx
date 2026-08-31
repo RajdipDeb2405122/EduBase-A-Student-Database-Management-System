@@ -26,9 +26,11 @@ const Layout = () => {
           <NavLink to="/" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             📊 Dashboard
           </NavLink>
-          // ADD this to the sidebar navigation (in the Admin section):
           <NavLink to="/pending-requests" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             📥 Pending Requests
+          </NavLink>
+          <NavLink to="/course-registration-requests" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          📚 Course Requests
           </NavLink>
 
           <div className="nav-section-title">Academic</div>

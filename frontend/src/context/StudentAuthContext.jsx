@@ -19,8 +19,8 @@ export const StudentAuthProvider = ({ children }) => {
     setLoading(false)
   }, [])
 
-  const studentLogin = async (email) => {
-    const { data } = await api.post('/student-auth/login', { email, password: 'temp' })
+  const studentLogin = async (email, password) => {
+    const { data } = await api.post('/student-auth/login', { email, password })
     
     localStorage.setItem('edubase_student_id', data.student_id)
     localStorage.setItem('edubase_student_data', JSON.stringify(data))

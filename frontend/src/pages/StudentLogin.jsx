@@ -4,6 +4,7 @@ import { useStudentAuth } from '../context/StudentAuthContext'
 
 const StudentLogin = () => {
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { studentLogin } = useStudentAuth()
@@ -15,7 +16,7 @@ const StudentLogin = () => {
     setLoading(true)
 
     try {
-      await studentLogin(email)
+      await studentLogin(email, password)
       navigate('/student-dashboard')
     } catch (err) {
       setError(err.message || 'Invalid credentials')
@@ -64,6 +65,14 @@ const StudentLogin = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="your.email@example.com" />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Password</label>
+            <input type="password" className="form-input" required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter your password" />
           </div>
 
           <button type="submit" className="btn btn-primary" 

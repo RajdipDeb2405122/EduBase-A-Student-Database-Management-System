@@ -1,3 +1,5 @@
+
+
 -- EduBase Database Schema
 -- Based on Student Database ERD with Administrative Authority Layer
 
@@ -183,3 +185,24 @@ ALTER TABLE exam ADD CONSTRAINT chk_obtained_marks CHECK (obtained_marks >= 0);
 ALTER TABLE exam ADD CONSTRAINT chk_marks CHECK (obtained_marks <= total_marks);
 ALTER TABLE payment ADD CONSTRAINT chk_payment_amount CHECK (amount >= 0);
 ALTER TABLE scholarship ADD CONSTRAINT chk_scholarship_amount CHECK (amount >= 0);
+
+-- 1. Add password_hash to student table
+ALTER TABLE student ADD COLUMN password_hash VARCHAR(255);
+
+-- 2. Create course registration requests table
+CREATE TABLE course_registration_requests (
+    request_id SERIAL PRIMARY KEY,
+    student_id INT REFERENCES student(student_id),
+    course_id INT REFERENCES course(course_id),
+    academic_year VARCHAR(20) NOT NULL,
+    term VARCHAR(20) NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending',
+    requested_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    reviewed_by_admin_id INT REFERENCES admin(admin_id),
+    reviewed_on TIMESTAMP,
+    rejection_reason TEXT,
+    UNIQUE(student_id, course_id, academic_year, term, status)
+);
+
+-- 3. Add unique constraint on student registration_no
+ALTER TABLE student ADD CONSTRAINT student_registration_no_unique UNIQUE (registration_no);

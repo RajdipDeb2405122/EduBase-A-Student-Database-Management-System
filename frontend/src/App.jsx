@@ -21,6 +21,11 @@ import StudentRegister from './pages/StudentRegister'
 import StudentLogin from './pages/StudentLogin'
 import StudentDashboard from './pages/StudentDashboard'
 
+// ADD import
+import CourseRegistrationRequests from './pages/CourseRegistrationRequests'
+
+
+
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated } = useAuth()
   return isAuthenticated ? children : <Navigate to="/login" />
@@ -59,6 +64,10 @@ function App() {
               <Route path="admin-users" element={<AdminUsers />} />
               <Route path="activity-log" element={<ActivityLog />} />
               <Route path="pending-requests" element={<PendingRequests />} />
+              
+
+// ADD route
+<Route path="course-registration-requests" element={<CourseRegistrationRequests />} />
             </Route>
             <Route path="/student-dashboard" element={
               <StudentProtectedRoute>
@@ -66,6 +75,7 @@ function App() {
               </StudentProtectedRoute>
             } />
           </Routes>
+          
         </BrowserRouter>
       </StudentAuthProvider>
     </AuthProvider>

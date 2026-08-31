@@ -25,6 +25,9 @@ const dashboardRoutes = require('./routes/dashboard');
 const studentAuthRoutes = require('./routes/studentAuth');
 const studentRegistrationRoutes = require('./routes/studentRegistration');
 
+// ADD these requires at the top
+const courseRegistrationRoutes = require('./routes/courseRegistration');
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/departments', departmentRoutes);
@@ -40,6 +43,10 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/student-auth', studentAuthRoutes);
 app.use('/api/student-registration', studentRegistrationRoutes);
+
+
+// ADD these routes before app.listen
+app.use('/api/course-registration', courseRegistrationRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -57,7 +64,9 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 EduBase API Server running on port ${PORT}`);
   console.log(`   Local: http://localhost:${PORT}/api/health`);
 });
+

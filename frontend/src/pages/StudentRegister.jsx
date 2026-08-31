@@ -16,7 +16,8 @@ const StudentRegister = () => {
     phone: '',
     date_of_birth: '',
     program_id: '',
-    password: ''
+    password: '',
+    confirmPassword: ''
   })
 
   useEffect(() => {
@@ -32,14 +33,53 @@ const StudentRegister = () => {
     }
   }
 
+  const validateRegistrationNo = (regNo) => {
+    if (!regNo) return true; // Optional
+    const regex = /^\d{7}$/;
+    if (!regex.test(regNo)) {
+      return 'Registration number must be exactly 7 digits (YYXXXXX format)';
+    }
+    const year = parseInt(regNo.substring(0, 2));
+    if (year < 21 || year > 30) {
+      return 'First 2 digits must be year (21-30)';
+    }
+    return true;
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setSuccess('')
+
+    // Validation
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters')
+      return
+    }
+
+    const regValidation = validateRegistrationNo(formData.registration_no)
+    if (regValidation !== true) {
+      setError(regValidation)
+      return
+    }
+
     setLoading(true)
 
     try {
-      await api.post('/student-auth/register', formData)
+      await api.post('/student-auth/register', {
+        registration_no: formData.registration_no || null,
+        full_name: formData.full_name,
+        email: formData.email,
+        phone: formData.phone,
+        date_of_birth: formData.date_of_birth,
+        program_id: parseInt(formData.program_id),
+        password: formData.password
+      })
       setSuccess('Registration request submitted! Please wait for admin approval.')
       setTimeout(() => navigate('/student-login'), 2000)
     } catch (err) {
@@ -63,7 +103,7 @@ const StudentRegister = () => {
         borderRadius: '16px', 
         padding: '2.5rem', 
         width: '100%', 
-        maxWidth: '500px',
+        maxWidth: '550px',
         boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
       }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
@@ -90,11 +130,14 @@ const StudentRegister = () => {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Registration Number (Optional)</label>
-            <input type="text" className="form-input" 
+            <label className="form-label">Registration Number (7 digits: YYXXXXX)</label>
+            <input type="text" className="form-input" maxLength={7}
               value={formData.registration_no}
-              onChange={(e) => setFormData({...formData, registration_no: e.target.value})}
-              placeholder="e.g., CSE2024001" />
+              onChange={(e) => setFormData({...formData, registration_no: e.target.value.replace(/\D/g, '')})}
+              placeholder="e.g., 2105001" />
+            <small style={{ color: '#64748b', fontSize: '0.75rem' }}>
+              First 2 digits: Year (21-30), Next 2 digits: Dept Code, Last 3 digits: Your number
+            </small>
           </div>
 
           <div className="form-group">
@@ -143,12 +186,21 @@ const StudentRegister = () => {
             </select>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Create Password *</label>
-            <input type="password" className="form-input" required minLength="6"
-              value={formData.password}
-              onChange={(e) => setFormData({...formData, password: e.target.value})}
-              placeholder="Minimum 6 characters" />
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Password *</label>
+              <input type="password" className="form-input" required minLength={6}
+                value={formData.password}
+                onChange={(e) => setFormData({...formData, password: e.target.value})}
+                placeholder="Minimum 6 characters" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Confirm Password *</label>
+              <input type="password" className="form-input" required
+                value={formData.confirmPassword}
+                onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
+                placeholder="Confirm password" />
+            </div>
           </div>
 
           <button type="submit" className="btn btn-primary" 

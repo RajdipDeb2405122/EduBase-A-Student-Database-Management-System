@@ -1,117 +1,90 @@
-const express = require('express');
+const router = require('express').Router();
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const pool = require('../config/database');
+const auth = require('../middleware/auth');
+const { login, session } = require('../lib/login');
 
-const router = express.Router();
+const {
+  wrap,
+  check,
+  password,
+  transaction
+} = require('../lib/common');
 
-// Login
-router.post('/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
+router.post('/login', wrap(login('admin')));
 
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password are required' });
-    }
+router.get('/session', auth, wrap(async (req, res) => {
+  res
+    .set('Cache-Control', 'no-store')
+    .json(await session(req.user));
+}));
 
-    const result = await pool.query(
-      'SELECT * FROM admin WHERE username = $1 AND status = $2',
-      [username, 'active']
+router.get(
+  '/me',
+  auth,
+  auth.requireAdmin,
+  wrap(async (req, res) => {
+    res
+      .set('Cache-Control', 'no-store')
+      .json((await session(req.user)).profile);
+  })
+);
+
+// Revoke only the supplied session.
+// Other roles and other devices are not logged out.
+router.post('/logout', wrap(async (req, res) => {
+  const match = /^Bearer\s+(\S+)$/i.exec(
+    req.get('Authorization') || ''
+  );
+
+  if (match) {
+    await auth.revokeSession(match[1]);
+  }
+
+  res.json({ message: 'Logged out' });
+}));
+
+router.post(
+  '/change-password',
+  auth,
+  wrap(async (req, res) => {
+    const nextPassword = password(req.body.newPassword);
+
+    check(
+      typeof req.body.currentPassword === 'string',
+      'Current password is required'
     );
 
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    await transaction(async db => {
+      const result = await db.query(`
+        SELECT password_hash
+        FROM users
+        WHERE user_id=$1
+        FOR UPDATE
+      `, [req.user.user_id]);
 
-    const admin = result.rows[0];
-    const isMatch = await bcrypt.compare(password, admin.password_hash);
+      check(
+        await bcrypt.compare(
+          req.body.currentPassword,
+          result.rows[0].password_hash
+        ),
+        'Current password is incorrect'
+      );
 
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Update last login
-    await pool.query(
-      'UPDATE admin SET last_login = CURRENT_TIMESTAMP WHERE admin_id = $1',
-      [admin.admin_id]
-    );
-
-    // Generate token
-    const token = jwt.sign(
-      { admin_id: admin.admin_id, username: admin.username, role: admin.role },
-      process.env.JWT_SECRET || 'edubase_jwt_secret_key_2024',
-      { expiresIn: '24h' }
-    );
+      await db.query(`
+        UPDATE users
+        SET password_hash=$1,
+            token_version=token_version+1
+        WHERE user_id=$2
+      `, [
+        await bcrypt.hash(nextPassword, 12),
+        req.user.user_id
+      ]);
+    });
 
     res.json({
-      token,
-      admin: {
-        admin_id: admin.admin_id,
-        username: admin.username,
-        full_name: admin.full_name,
-        email: admin.email,
-        role: admin.role
-      }
+      message: 'Password changed. Please sign in again.'
     });
-  } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ error: 'Login failed' });
-  }
-});
-
-// Get current admin profile
-router.get('/me', async (req, res) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({ error: 'Not authenticated' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'edubase_jwt_secret_key_2024');
-    const result = await pool.query(
-      'SELECT admin_id, username, full_name, email, role, status, last_login FROM admin WHERE admin_id = $1',
-      [decoded.admin_id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Admin not found' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid token' });
-  }
-});
-
-// Change password
-router.post('/change-password', async (req, res) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({ error: 'Not authenticated' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'edubase_jwt_secret_key_2024');
-    const { currentPassword, newPassword } = req.body;
-
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: 'Current and new password are required' });
-    }
-
-    const result = await pool.query('SELECT password_hash FROM admin WHERE admin_id = $1', [decoded.admin_id]);
-    const isMatch = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
-
-    if (!isMatch) {
-      return res.status(400).json({ error: 'Current password is incorrect' });
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE admin SET password_hash = $1 WHERE admin_id = $2', [hashedPassword, decoded.admin_id]);
-
-    res.json({ message: 'Password changed successfully' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to change password' });
-  }
-});
+  })
+);
 
 module.exports = router;

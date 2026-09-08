@@ -1,161 +1,220 @@
-const express = require('express');
+const router = require('express').Router();
 const pool = require('../config/database');
 const auth = require('../middleware/auth');
 
-const router = express.Router();
+const {
+  wrap, check, id, text, transaction, log
+} = require('../lib/common');
 
-// Student requests course registration
-router.post('/request', auth, async (req, res) => {
-  try {
-    const { student_id, course_id, academic_year, term } = req.body;
+router.use(auth);
 
-    // Check if already enrolled or has pending request
-    const existing = await pool.query(
-      `SELECT * FROM enrollment WHERE student_id = $1 AND course_id = $2 AND academic_year = $3 AND term = $4`,
-      [student_id, course_id, academic_year, term]
+router.post(
+  '/request',
+  auth.requireStudent,
+  wrap(async (req, res) => {
+    const studentId = req.user.student_id;
+    const courseId = id(req.body.course_id, 'course');
+
+    check(
+      req.body.student_id == null ||
+        id(req.body.student_id) === studentId,
+      'You cannot request for another student',
+      403
     );
-    
-    const existingRequest = await pool.query(
-      `SELECT * FROM course_registration_requests 
-       WHERE student_id = $1 AND course_id = $2 AND academic_year = $3 AND term = $4 AND status = 'pending'`,
-      [student_id, course_id, academic_year, term]
-    );
 
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ error: 'Already enrolled in this course' });
-    }
-    
-    if (existingRequest.rows.length > 0) {
-      return res.status(400).json({ error: 'Request already pending' });
-    }
+    const year = text(req.body.academic_year, 'academic year', 20);
+    const term = text(req.body.term, 'term', 20);
 
-    const result = await pool.query(
-      `INSERT INTO course_registration_requests 
-       (student_id, course_id, academic_year, term, status)
-       VALUES ($1, $2, $3, $4, 'pending') RETURNING *`,
-      [student_id, course_id, academic_year, term]
-    );
+    const result = await transaction(async db => {
+      const valid = await db.query(`
+        SELECT 1
+        FROM course c
+        JOIN student s ON s.program_id=c.program_id
+        WHERE c.course_id=$1
+          AND s.student_id=$2
+          AND c.active=TRUE
+      `, [courseId, studentId]);
+
+      check(
+        valid.rowCount,
+        'Select an active course from your program'
+      );
+
+      const e = await db.query(`
+        SELECT 1 FROM enrollment
+        WHERE student_id=$1
+          AND course_id=$2
+          AND academic_year=$3
+          AND term=$4
+      `, [studentId, courseId, year, term]);
+
+      check(
+        !e.rowCount,
+        'Already enrolled for this year and term',
+        409
+      );
+
+      return db.query(`
+        INSERT INTO course_registration_requests (
+          student_id,course_id,academic_year,term
+        )
+        VALUES($1,$2,$3,$4)
+        RETURNING *
+      `, [studentId, courseId, year, term]);
+    });
 
     res.status(201).json({
-      message: 'Course registration request submitted!',
+      message: 'Course registration requested',
       request: result.rows[0]
     });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  })
+);
+
+router.use(auth.requireAdmin);
+
+const list = fixed => wrap(async (req, res) => {
+  const status = fixed || req.query.status || null;
+
+  check(
+    !status || ['pending', 'approved', 'rejected'].includes(status),
+    'Invalid status'
+  );
+
+  const r = await pool.query(`
+    SELECT
+      r.*,c.course_code,c.course_title,c.credit_hours,
+      s.registration_no,s.full_name AS student_name,
+      s.email AS student_email,p.program_name,
+      a.full_name AS reviewed_by_name
+    FROM course_registration_requests r
+    JOIN course c ON c.course_id=r.course_id
+    JOIN student s ON s.student_id=r.student_id
+    JOIN program p ON p.program_id=s.program_id
+    LEFT JOIN admin_public a ON a.admin_id=r.reviewed_by_admin_id
+    WHERE ($1::text IS NULL OR r.status=$1)
+    ORDER BY r.requested_on DESC
+  `, [status]);
+
+  res.json(r.rows);
 });
 
-// Get all pending course requests (admin)
-router.get('/pending', auth, async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT crr.*, c.course_code, c.course_title, c.credit_hours,
-             s.registration_no, s.full_name as student_name, s.email as student_email,
-             p.program_name
-      FROM course_registration_requests crr
-      JOIN course c ON crr.course_id = c.course_id
-      JOIN student s ON crr.student_id = s.student_id
-      JOIN program p ON s.program_id = p.program_id
-      WHERE crr.status = 'pending'
-      ORDER BY crr.requested_on DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.get('/pending', list('pending'));
+router.get('/', list(null));
 
-// Get all requests (admin with filter)
-router.get('/', auth, async (req, res) => {
-  try {
-    const { status } = req.query;
-    let query = `
-      SELECT crr.*, c.course_code, c.course_title,
-             s.registration_no, s.full_name as student_name,
-             a.full_name as reviewed_by_name
-      FROM course_registration_requests crr
-      JOIN course c ON crr.course_id = c.course_id
-      JOIN student s ON crr.student_id = s.student_id
-      LEFT JOIN admin a ON crr.reviewed_by_admin_id = a.admin_id
-    `;
-    const params = [];
-    if (status) {
-      query += ' WHERE crr.status = $1';
-      params.push(status);
-    }
-    query += ' ORDER BY crr.requested_on DESC';
-    
-    const result = await pool.query(query, params);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+router.put('/:id/approve', wrap(async (req, res) => {
+  await transaction(async db => {
+    const r = await db.query(`
+      SELECT * FROM course_registration_requests
+      WHERE request_id=$1 AND status='pending'
+      FOR UPDATE
+    `, [id(req.params.id)]);
 
-// Approve course registration
-router.put('/:id/approve', auth, async (req, res) => {
-  try {
-    const requestResult = await pool.query(
-      'SELECT * FROM course_registration_requests WHERE request_id = $1 AND status = $2',
-      [req.params.id, 'pending']
+    check(
+      r.rowCount,
+      'Request not found or already processed',
+      409
     );
 
-    if (requestResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Request not found or already processed' });
-    }
+    const q = r.rows[0];
 
-    const request = requestResult.rows[0];
+    const valid = await db.query(`
+      SELECT 1
+      FROM student s
+      JOIN users u ON u.user_id=s.user_id
+      JOIN course c ON c.program_id=s.program_id
+      WHERE s.student_id=$1
+        AND c.course_id=$2
+        AND s.current_status='active'
+        AND u.status='active'
+        AND c.active=TRUE
+    `, [q.student_id, q.course_id]);
 
-    // Create enrollment
-    await pool.query(
-      `INSERT INTO enrollment (student_id, course_id, authorized_by_admin_id, academic_year, term, status)
-       VALUES ($1, $2, $3, $4, $5, 'enrolled')`,
-      [request.student_id, request.course_id, req.admin.admin_id, request.academic_year, request.term]
+    check(
+      valid.rowCount,
+      'Student/course is inactive or program does not match'
     );
 
-    // Update request status
-    await pool.query(
-      `UPDATE course_registration_requests 
-       SET status = 'approved', reviewed_by_admin_id = $1, reviewed_on = CURRENT_TIMESTAMP
-       WHERE request_id = $2`,
-      [req.admin.admin_id, req.params.id]
+    const e = await db.query(`
+      INSERT INTO enrollment (
+        student_id,course_id,academic_year,term,
+        authorized_by_admin_id
+      )
+      VALUES($1,$2,$3,$4,$5)
+      ON CONFLICT(student_id,course_id,academic_year,term)
+      DO NOTHING
+      RETURNING enrollment_id
+    `, [
+      q.student_id,
+      q.course_id,
+      q.academic_year,
+      q.term,
+      req.admin.admin_id
+    ]);
+
+    check(
+      e.rowCount,
+      'Student is already enrolled; reject this stale request instead',
+      409
     );
 
-    // Log action
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'enrollment', $2, 'AUTHORIZE', $3)`,
-      [req.admin.admin_id, request.student_id, `Approved course registration`]
+    await db.query(`
+      UPDATE course_registration_requests
+      SET status='approved',
+          reviewed_by_admin_id=$1,
+          reviewed_on=CURRENT_TIMESTAMP
+      WHERE request_id=$2
+    `, [req.admin.admin_id, q.request_id]);
+
+    await log(
+      db,
+      req.admin.admin_id,
+      'enrollment',
+      e.rows[0].enrollment_id,
+      'AUTHORIZE',
+      'Approved course registration'
+    );
+  });
+
+  res.json({ message: 'Course registration approved' });
+}));
+
+router.put('/:id/reject', wrap(async (req, res) => {
+  await transaction(async db => {
+    const r = await db.query(`
+      UPDATE course_registration_requests
+      SET status='rejected',
+          reviewed_by_admin_id=$1,
+          reviewed_on=CURRENT_TIMESTAMP,
+          rejection_reason=$2
+      WHERE request_id=$3 AND status='pending'
+      RETURNING request_id
+    `, [
+      req.admin.admin_id,
+      text(
+        req.body.rejection_reason || 'No reason provided',
+        'reason',
+        1000
+      ),
+      id(req.params.id)
+    ]);
+
+    check(
+      r.rowCount,
+      'Request not found or already processed',
+      409
     );
 
-    res.json({ message: 'Course registration approved!' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Reject course registration
-router.put('/:id/reject', auth, async (req, res) => {
-  try {
-    const { rejection_reason } = req.body;
-
-    const result = await pool.query(
-      `UPDATE course_registration_requests 
-       SET status = 'rejected', reviewed_by_admin_id = $1, 
-           reviewed_on = CURRENT_TIMESTAMP, rejection_reason = $2
-       WHERE request_id = $3 AND status = 'pending'
-       RETURNING *`,
-      [req.admin.admin_id, rejection_reason || 'No reason provided', req.params.id]
+    await log(
+      db,
+      req.admin.admin_id,
+      'course_registration_requests',
+      id(req.params.id),
+      'REJECT',
+      'Rejected course registration'
     );
+  });
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Request not found or already processed' });
-    }
-
-    res.json({ message: 'Course registration rejected' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json({ message: 'Course registration rejected' });
+}));
 
 module.exports = router;

@@ -1,72 +1,120 @@
-const express = require('express');
-const cors = require('cors');
 require('dotenv').config();
 
+const express = require('express');
+const cors = require('cors');
+const auth = require('./middleware/auth');
+const { errors } = require('./lib/common');
+const live = require('./lib/live');
+
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-// Middleware
 app.use(cors());
-app.use(express.json());
 
-// Import routes
-const authRoutes = require('./routes/auth');
-const departmentRoutes = require('./routes/departments');
-const programRoutes = require('./routes/programs');
-const facultyRoutes = require('./routes/faculty');
-const studentRoutes = require('./routes/students');
-const courseRoutes = require('./routes/courses');
-const enrollmentRoutes = require('./routes/enrollments');
-const examRoutes = require('./routes/exams');
-const scholarshipRoutes = require('./routes/scholarships');
-const paymentRoutes = require('./routes/payments');
-const adminRoutes = require('./routes/admin');
-const dashboardRoutes = require('./routes/dashboard');
-const studentAuthRoutes = require('./routes/studentAuth');
-const studentRegistrationRoutes = require('./routes/studentRegistration');
+// Ordinary JSON requests remain small.
+// Profile-photo uploads use their own bounded raw-body parser.
+app.use(express.json({ limit: '64kb' }));
 
-// ADD these requires at the top
-const courseRegistrationRoutes = require('./routes/courseRegistration');
+app.use(live.notifyChanges);
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/departments', departmentRoutes);
-app.use('/api/programs', programRoutes);
-app.use('/api/faculty', facultyRoutes);
-app.use('/api/students', studentRoutes);
-app.use('/api/courses', courseRoutes);
-app.use('/api/enrollments', enrollmentRoutes);
-app.use('/api/exams', examRoutes);
-app.use('/api/scholarships', scholarshipRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/student-auth', studentAuthRoutes);
-app.use('/api/student-registration', studentRegistrationRoutes);
+app.get('/api/live', auth, live.stream);
 
-
-// ADD these routes before app.listen
-app.use('/api/course-registration', courseRegistrationRoutes);
-
-// Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'EduBase API is running' });
+  res.json({
+    status: 'ok',
+    message: 'EduBase API is running'
+  });
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!', message: err.message });
-});
+app.use('/api/auth', require('./routes/auth'));
 
-// 404 handler
+app.use('/api/profile', require('./routes/profile'));
+
+app.use(
+  '/api/student-auth',
+  require('./routes/studentAuth')
+);
+
+app.use(
+  '/api/faculty-auth',
+  require('./routes/facultyAuth')
+);
+
+app.use(
+  '/api/student-registration',
+  require('./routes/studentRegistration')
+);
+
+app.use(
+  '/api/faculty-registration',
+  require('./routes/facultyRegistration')
+);
+
+app.use(
+  '/api/faculty-portal',
+  require('./routes/facultyPortal')
+);
+
+app.use(
+  '/api/course-registration',
+  require('./routes/courseRegistration')
+);
+
+const catalogueAccess = (req, res, next) => {
+  if (['GET', 'HEAD'].includes(req.method)) {
+    return next();
+  }
+
+  auth(req, res, error => {
+    if (error) return next(error);
+    auth.requireAdmin(req, res, next);
+  });
+};
+
+app.use(
+  '/api/departments',
+  catalogueAccess,
+  require('./routes/departments')
+);
+
+app.use(
+  '/api/programs',
+  catalogueAccess,
+  require('./routes/programs')
+);
+
+for (const [url, file] of Object.entries({
+  admin: 'admin',
+  students: 'students',
+  faculty: 'faculty',
+  courses: 'courses',
+  enrollments: 'enrollments',
+  exams: 'exams',
+  payments: 'payments',
+  scholarships: 'scholarships',
+  dashboard: 'dashboard'
+})) {
+  app.use(
+    `/api/${url}`,
+    auth,
+    auth.requireAdmin,
+    require(`./routes/${file}`)
+  );
+}
+
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  res.status(404).json({
+    error: 'Route not found'
+  });
 });
 
+app.use(errors);
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🚀 EduBase API Server running on port ${PORT}`);
-  console.log(`   Local: http://localhost:${PORT}/api/health`);
-});
+if (require.main === module) {
+  app.listen(
+    process.env.PORT || 5000,
+    '0.0.0.0',
+    () => console.log('EduBase API started')
+  );
+}
 
+module.exports = app;

@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
       FROM enrollment e
       JOIN student s ON e.student_id = s.student_id
       JOIN course c ON e.course_id = c.course_id
-      LEFT JOIN admin a ON e.authorized_by_admin_id = a.admin_id
+      LEFT JOIN admin_public a ON e.authorized_by_admin_id = a.admin_id
       WHERE 1=1
     `;
     const params = [];
@@ -61,7 +61,7 @@ router.get('/:id', async (req, res) => {
       FROM enrollment e
       JOIN student s ON e.student_id = s.student_id
       JOIN course c ON e.course_id = c.course_id
-      LEFT JOIN admin a ON e.authorized_by_admin_id = a.admin_id
+      LEFT JOIN admin_public a ON e.authorized_by_admin_id = a.admin_id
       WHERE e.enrollment_id = $1
     `, [req.params.id]);
 
@@ -93,7 +93,7 @@ router.post('/', auth, async (req, res) => {
       `INSERT INTO enrollment (student_id, course_id, authorized_by_admin_id, 
         academic_year, term, enrolled_on, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'enrolled') RETURNING *`,
-      [student_id, course_id, req.admin.admin_id, academic_year, term, enrolled_on]
+      [student_id, course_id, req.admin.admin_id, academic_year, term, enrolled_on || new Date()]
     );
 
     await pool.query(

@@ -1,4 +1,7 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// Keep PostgreSQL DATE values as calendar dates, avoiding timezone shifts.
+types.setTypeParser(1082, value => value);
 require('dotenv').config();
 
 const pool = new Pool({

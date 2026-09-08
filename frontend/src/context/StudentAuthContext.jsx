@@ -1,48 +1,23 @@
-import { createContext, useContext, useState, useEffect } from 'react'
-import api from '../api'
+import { useRoleAuth } from './AuthContext'
 
-const StudentAuthContext = createContext(null)
+export const StudentAuthProvider = ({ children }) =>
+  children
 
-export const StudentAuthProvider = ({ children }) => {
-  const [student, setStudent] = useState(null)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [loading, setLoading] = useState(true)
+export function useStudentAuth() {
+  const auth = useRoleAuth('student')
 
-  useEffect(() => {
-    const studentId = localStorage.getItem('edubase_student_id')
-    const studentData = localStorage.getItem('edubase_student_data')
-    
-    if (studentId && studentData) {
-      setStudent(JSON.parse(studentData))
-      setIsAuthenticated(true)
-    }
-    setLoading(false)
-  }, [])
+  return {
+    user: auth.user,
+    student: auth.profile,
+    token: auth.token,
+    isAuthenticated: auth.isAuthenticated,
+    loading: auth.loading,
+    logout: auth.logout,
 
-  const studentLogin = async (email, password) => {
-    const { data } = await api.post('/student-auth/login', { email, password })
-    
-    localStorage.setItem('edubase_student_id', data.student_id)
-    localStorage.setItem('edubase_student_data', JSON.stringify(data))
-    
-    setStudent(data)
-    setIsAuthenticated(true)
-    
-    return data
+    studentLogin: (email, password) =>
+      auth.signIn('student', {
+        email,
+        password
+      })
   }
-
-  const logout = () => {
-    localStorage.removeItem('edubase_student_id')
-    localStorage.removeItem('edubase_student_data')
-    setStudent(null)
-    setIsAuthenticated(false)
-  }
-
-  return (
-    <StudentAuthContext.Provider value={{ student, isAuthenticated, loading, studentLogin, logout }}>
-      {children}
-    </StudentAuthContext.Provider>
-  )
 }
-
-export const useStudentAuth = () => useContext(StudentAuthContext)

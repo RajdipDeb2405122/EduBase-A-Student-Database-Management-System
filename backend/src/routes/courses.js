@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
       SELECT c.*, p.program_name, f.full_name as faculty_name
       FROM course c
       LEFT JOIN program p ON c.program_id = p.program_id
-      LEFT JOIN faculty f ON c.faculty_id = f.faculty_id
+      LEFT JOIN faculty_public f ON c.faculty_id = f.faculty_id
       WHERE 1=1
     `;
     const params = [];
@@ -45,7 +45,7 @@ router.get('/:id', async (req, res) => {
       SELECT c.*, p.program_name, f.full_name as faculty_name
       FROM course c
       LEFT JOIN program p ON c.program_id = p.program_id
-      LEFT JOIN faculty f ON c.faculty_id = f.faculty_id
+      LEFT JOIN faculty_public f ON c.faculty_id = f.faculty_id
       WHERE c.course_id = $1
     `, [req.params.id]);
 
@@ -65,7 +65,7 @@ router.get('/code/:code', async (req, res) => {
       SELECT c.*, p.program_name, f.full_name as faculty_name
       FROM course c
       LEFT JOIN program p ON c.program_id = p.program_id
-      LEFT JOIN faculty f ON c.faculty_id = f.faculty_id
+      LEFT JOIN faculty_public f ON c.faculty_id = f.faculty_id
       WHERE c.course_code = $1
     `, [req.params.code]);
 
@@ -81,21 +81,46 @@ router.get('/code/:code', async (req, res) => {
 // Create course
 router.post('/', auth, async (req, res) => {
   try {
-    const { program_id, faculty_id, course_code, course_title, credit_hours,
-            term_no, course_type, active } = req.body;
+    const {
+      program_id,
+      faculty_id,
+      course_code,
+      course_title,
+      credit_hours,
+      term_no,
+      course_type,
+      active
+    } = req.body;
 
     const result = await pool.query(
-      `INSERT INTO course (program_id, faculty_id, course_code, course_title, 
-        credit_hours, term_no, course_type, active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [program_id, faculty_id, course_code, course_title, credit_hours,
-       term_no, course_type, active !== false]
+      `INSERT INTO course (
+        program_id, faculty_id, course_code, course_title,
+        credit_hours, term_no, course_type, active
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *`,
+      [
+        program_id,
+        faculty_id || null,
+        course_code,
+        course_title,
+        credit_hours,
+        term_no,
+        course_type,
+        active !== false
+      ]
     );
 
     await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'course', $2, 'CREATE', $3)`,
-      [req.admin.admin_id, result.rows[0].course_id, `Created course: ${course_code} - ${course_title}`]
+      `INSERT INTO admin_action_log (
+        admin_id, target_table, target_id, action_type, new_value
+      )
+      VALUES ($1, 'course', $2, 'CREATE', $3)`,
+      [
+        req.admin.admin_id,
+        result.rows[0].course_id,
+        `Created course: ${course_code} - ${course_title}`
+      ]
     );
 
     res.status(201).json(result.rows[0]);
@@ -107,15 +132,40 @@ router.post('/', auth, async (req, res) => {
 // Update course
 router.put('/:id', auth, async (req, res) => {
   try {
-    const { program_id, faculty_id, course_code, course_title, credit_hours,
-            term_no, course_type, active } = req.body;
+    const {
+      program_id,
+      faculty_id,
+      course_code,
+      course_title,
+      credit_hours,
+      term_no,
+      course_type,
+      active
+    } = req.body;
 
     const result = await pool.query(
-      `UPDATE course SET program_id = $1, faculty_id = $2, course_code = $3,
-       course_title = $4, credit_hours = $5, term_no = $6, course_type = $7, active = $8
-       WHERE course_id = $9 RETURNING *`,
-      [program_id, faculty_id, course_code, course_title, credit_hours,
-       term_no, course_type, active, req.params.id]
+      `UPDATE course
+       SET program_id = $1,
+           faculty_id = $2,
+           course_code = $3,
+           course_title = $4,
+           credit_hours = $5,
+           term_no = $6,
+           course_type = $7,
+           active = $8
+       WHERE course_id = $9
+       RETURNING *`,
+      [
+        program_id,
+        faculty_id || null,
+        course_code,
+        course_title,
+        credit_hours,
+        term_no,
+        course_type,
+        active,
+        req.params.id
+      ]
     );
 
     if (result.rows.length === 0) {
@@ -123,9 +173,15 @@ router.put('/:id', auth, async (req, res) => {
     }
 
     await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'course', $2, 'UPDATE', $3)`,
-      [req.admin.admin_id, req.params.id, `Updated course: ${course_code}`]
+      `INSERT INTO admin_action_log (
+        admin_id, target_table, target_id, action_type, new_value
+      )
+      VALUES ($1, 'course', $2, 'UPDATE', $3)`,
+      [
+        req.admin.admin_id,
+        req.params.id,
+        `Updated course: ${course_code}`
+      ]
     );
 
     res.json(result.rows[0]);
@@ -133,7 +189,6 @@ router.put('/:id', auth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // Delete course
 router.delete('/:id', auth, async (req, res) => {
   try {

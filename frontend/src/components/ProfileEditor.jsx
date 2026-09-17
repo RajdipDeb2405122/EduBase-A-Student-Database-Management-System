@@ -386,7 +386,7 @@ export default function ProfileEditor({
 
             <p style={{
               fontSize: '0.85rem',
-              color: '#64748b'
+              color: 'var(--text-secondary)'
             }}>
               JPG, PNG or WebP, up to 3 MB and 25 megapixels.
               Automatically cropped to 256 × 256.

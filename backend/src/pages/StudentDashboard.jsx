@@ -1,16 +1,59 @@
-import { useState, useEffect } from 'react'
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useRef
+} from 'react'
+
 import { useNavigate } from 'react-router-dom'
 import { useStudentAuth } from '../context/StudentAuthContext'
+import useLiveUpdates from '../hooks/useLiveUpdates'
+import useViewState from '../hooks/useViewState'
 import api from '../api'
+
+import ProfileEditor from '../components/ProfileEditor'
+import ProfileAvatar from '../components/ProfileAvatar'
+import CoursePaymentPanel from '../components/CoursePaymentPanel'
+import PaymentHistory from '../components/PaymentHistory'
 
 const StudentDashboard = () => {
   const { student, logout } = useStudentAuth()
   const navigate = useNavigate()
 
-  // Tabs
-  const [activeTab, setActiveTab] = useState('profile')
+  const studentId = student?.student_id
+  const currentYear = new Date().getFullYear()
 
-  // Data
+  const [view, setView] = useViewState(
+    'edubase_student_view',
+    {
+      tab: 'profile',
+      level: '',
+      year: `${currentYear}-${currentYear + 1}`,
+      term: 'Fall'
+    }
+  )
+
+  const activeTab = view.tab
+  const selectedLevel = view.level
+  const regYear = view.year
+  const regTerm = view.term
+
+  const setActiveTab = tab => setView({ tab })
+  const setSelectedLevel = level => setView({ level })
+  const setRegYear = year => setView({ year })
+  const setRegTerm = term => setView({ term })
+
+  const academicYears = [
+    ...new Set([
+      regYear,
+      ...Array.from(
+        { length: 5 },
+        (_, index) =>
+          `${currentYear + 1 - index}-${currentYear + 2 - index}`
+      )
+    ])
+  ].sort((a, b) => b.localeCompare(a))
+
   const [profile, setProfile] = useState(null)
   const [enrollments, setEnrollments] = useState([])
   const [courseRequests, setCourseRequests] = useState([])
@@ -19,101 +62,210 @@ const StudentDashboard = () => {
   const [payments, setPayments] = useState([])
   const [scholarships, setScholarships] = useState([])
 
-  // Loading
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [requestingCourse, setRequestingCourse] = useState(null)
 
-  // Course registration
-  const [selectedLevel, setSelectedLevel] = useState('')
+  const [paymentConfig, setPaymentConfig] = useState({
+    enabled: false
+  })
 
-  const currentYear = new Date().getFullYear()
+  const [selectedPayment, setSelectedPayment] = useState(null)
+  const [paying, setPaying] = useState(false)
+  const [paymentError, setPaymentError] = useState('')
 
-  const academicYears = Array.from(
-    { length: 5 },
-    (_, i) => `${currentYear + 1 - i}-${currentYear + 2 - i}`
-  )
+  const dataVersion = useRef(0)
+  const coursesVersion = useRef(0)
 
-  const [regYear, setRegYear] = useState(
-    `${currentYear}-${currentYear + 1}`
-  )
+  const loadProfile = useCallback(async () => {
+    if (!studentId) return
 
-  const [regTerm, setRegTerm] = useState('Fall')
+    const version = ++dataVersion.current
+
+    try {
+      const [
+        person,
+        enrolled,
+        requests,
+        results,
+        paid,
+        awards,
+        personal,
+        paymentOptions
+      ] = await Promise.all([
+        api.get(`/student-auth/me/${studentId}`),
+
+        api.get(
+          `/student-auth/me/${studentId}/enrollments`
+        ),
+
+        api.get(
+          `/student-auth/me/${studentId}/course-requests`
+        ),
+
+        api.get(
+          `/student-auth/me/${studentId}/exams`
+        ),
+
+        api.get(
+          `/student-auth/me/${studentId}/payments`
+        ),
+
+        api.get(
+          `/student-auth/me/${studentId}/scholarships`
+        ),
+
+        api.get('/profile/me', {
+          role: 'student'
+        }),
+
+        api.get('/student-payments/config', {
+          role: 'student'
+        })
+      ])
+
+      // Ignore an older response if a newer refresh has started.
+      if (version !== dataVersion.current) return
+
+      setProfile({
+        ...person.data,
+        ...personal.data
+      })
+
+      setEnrollments(enrolled.data)
+      setCourseRequests(requests.data)
+      setExams(results.data)
+      setPayments(paid.data)
+      setScholarships(awards.data)
+      setPaymentConfig(paymentOptions.data)
+      setError('')
+    } catch (err) {
+      if (version === dataVersion.current) {
+        setError(err.message)
+      }
+    } finally {
+      if (version === dataVersion.current) {
+        setLoading(false)
+      }
+    }
+  }, [studentId])
+
+  const loadAvailableCourses = useCallback(async () => {
+    if (!studentId) return
+
+    const version = ++coursesVersion.current
+
+    try {
+      const query = selectedLevel
+        ? `?level=${selectedLevel}`
+        : ''
+
+      const { data } = await api.get(
+        `/student-auth/courses/${studentId}${query}`
+      )
+
+      if (version === coursesVersion.current) {
+        setAvailableCourses(data)
+      }
+    } catch (err) {
+      if (version === coursesVersion.current) {
+        setError(err.message)
+      }
+    }
+  }, [studentId, selectedLevel])
 
   useEffect(() => {
-    if (!student?.student_id) {
+    if (!studentId) {
       navigate('/student-login')
       return
     }
 
-    loadProfile()
-  }, [student])
+    void loadProfile()
+
+    return () => {
+      dataVersion.current++
+      coursesVersion.current++
+    }
+  }, [studentId, loadProfile, navigate])
 
   useEffect(() => {
-    if (profile && activeTab === 'courses') {
-      loadAvailableCourses()
+    if (activeTab === 'courses') {
+      void loadAvailableCourses()
     }
-  }, [activeTab, profile, selectedLevel])
+  }, [activeTab, loadAvailableCourses])
 
-  const loadProfile = async () => {
-    try {
-      const id = student.student_id
+  // Refresh data without resetting the selected dashboard tab.
+  useLiveUpdates(async () => {
+    await loadProfile()
 
-      const [
-        profileRes,
-        enrollRes,
-        reqRes,
-        examRes,
-        payRes,
-        schRes
-      ] = await Promise.all([
-        api.get(`/student-auth/me/${id}`),
-        api.get(`/student-auth/me/${id}/enrollments`),
-        api.get(`/student-auth/me/${id}/course-requests`),
-        api.get(`/student-auth/me/${id}/exams`),
-        api.get(`/student-auth/me/${id}/payments`),
-        api.get(`/student-auth/me/${id}/scholarships`)
-      ])
-
-      setProfile(profileRes.data)
-      setEnrollments(enrollRes.data)
-      setCourseRequests(reqRes.data)
-      setExams(examRes.data)
-      setPayments(payRes.data)
-      setScholarships(schRes.data)
-    } catch (err) {
-      console.error('Failed to load data:', err)
-    } finally {
-      setLoading(false)
+    if (activeTab === 'courses') {
+      await loadAvailableCourses()
     }
-  }
+  })
 
-  const loadAvailableCourses = async () => {
-    try {
-      let url = `/student-auth/courses/${student.student_id}`
+  const handleRequestCourse = async courseId => {
+    setRequestingCourse(courseId)
+    setMessage('')
+    setError('')
 
-      if (selectedLevel) {
-        url += `?level=${selectedLevel}`
-      }
-
-      const { data } = await api.get(url)
-      setAvailableCourses(data)
-    } catch (err) {
-      console.error('Failed to load courses:', err)
-    }
-  }
-
-  const handleRequestCourse = async (courseId) => {
     try {
       await api.post('/course-registration/request', {
-        student_id: student.student_id,
+        student_id: studentId,
         course_id: courseId,
         academic_year: regYear,
         term: regTerm
       })
 
-      alert('Course registration request submitted!')
-      loadProfile()
+      setMessage(
+        'Request submitted. The decision will appear here automatically.'
+      )
+
+      await loadProfile()
     } catch (err) {
-      alert(err.message)
+      setError(err.message)
+    } finally {
+      setRequestingCourse(null)
+    }
+  }
+
+  const openPayment = enrollment => {
+    setPaymentError('')
+    setSelectedPayment(enrollment)
+  }
+
+  const closePayment = () => {
+    if (paying) return
+
+    setSelectedPayment(null)
+    setPaymentError('')
+  }
+
+  const payCourse = async () => {
+    if (!selectedPayment || paying) return
+
+    setPaying(true)
+    setPaymentError('')
+
+    try {
+      // The amount and student identity are resolved by the server.
+      const { data } = await api.post(
+        `/student-payments/enrollments/${selectedPayment.enrollment_id}/pay`,
+        { confirm: true },
+        { role: 'student' }
+      )
+
+      setSelectedPayment(null)
+
+      setMessage(
+        `${data.message} Receipt: ${data.payment.receipt_no}`
+      )
+
+      await loadProfile()
+    } catch (err) {
+      setPaymentError(err.message)
+    } finally {
+      setPaying(false)
     }
   }
 
@@ -123,17 +275,13 @@ const StudentDashboard = () => {
   }
 
   if (loading) {
-    return <div className="spinner"></div>
+    return <div className="spinner" />
   }
 
-  const totalPaid = payments.reduce(
-    (sum, payment) => sum + parseFloat(payment.amount),
-    0
+  const confirmedEnrollments = enrollments.filter(
+    enrollment =>
+      enrollment.status !== 'pending_payment'
   )
-
-  const getLevelFromTerm = (termNo) => {
-    return Math.ceil(termNo / 2)
-  }
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: '👤' },
@@ -143,8 +291,37 @@ const StudentDashboard = () => {
     { id: 'scholarships', label: 'Scholarships', icon: '🎓' }
   ]
 
+  const requestDecision = request => {
+    if (request.status !== 'approved') {
+      return (
+        request.rejection_reason ||
+        'Awaiting admin review'
+      )
+    }
+
+    if (
+      request.enrollment_status === 'pending_payment'
+    ) {
+      return 'Pending Payment — ৳1,000'
+    }
+
+    if (request.enrollment_status === 'enrolled') {
+      return 'Enrolled'
+    }
+
+    return (
+      request.enrollment_status ||
+      'Contact registrar'
+    )
+  }
+
   return (
-    <div style={{ minHeight: '100vh', background: '#f8fafc' }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        background: '#f8fafc'
+      }}
+    >
       {/* Header */}
       <div
         style={{
@@ -153,7 +330,9 @@ const StudentDashboard = () => {
           padding: '1rem 2rem',
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          gap: '1rem',
+          flexWrap: 'wrap'
         }}
       >
         <div
@@ -165,10 +344,10 @@ const StudentDashboard = () => {
         >
           <div
             style={{
-              width: '40px',
-              height: '40px',
+              width: 40,
+              height: 40,
               background: '#2563eb',
-              borderRadius: '10px',
+              borderRadius: 10,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -180,7 +359,12 @@ const StudentDashboard = () => {
             E
           </div>
 
-          <span style={{ fontSize: '1.25rem', fontWeight: '700' }}>
+          <span
+            style={{
+              fontSize: '1.25rem',
+              fontWeight: 700
+            }}
+          >
             EduBase Student Portal
           </span>
         </div>
@@ -193,32 +377,34 @@ const StudentDashboard = () => {
           }}
         >
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontWeight: '600' }}>
+            <div style={{ fontWeight: 600 }}>
               {profile?.full_name}
             </div>
 
-            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+            {profile?.bengali_name && (
+              <div lang="bn">
+                {profile.bengali_name}
+              </div>
+            )}
+
+            <div
+              style={{
+                fontSize: '0.8rem',
+                color: '#64748b'
+              }}
+            >
               {profile?.registration_no}
             </div>
           </div>
 
-          <div
-            style={{
-              width: '40px',
-              height: '40px',
-              background: '#2563eb',
-              borderRadius: '10px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'white',
-              fontWeight: '600'
-            }}
-          >
-            {profile?.full_name?.charAt(0)}
-          </div>
+          <ProfileAvatar
+            src={profile?.profile_photo}
+            name={profile?.full_name || ''}
+            size={44}
+          />
 
           <button
+            type="button"
             className="btn btn-secondary"
             onClick={handleLogout}
           >
@@ -227,29 +413,35 @@ const StudentDashboard = () => {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Navigation */}
       <div
         style={{
           background: 'white',
           borderBottom: '1px solid #e2e8f0',
           padding: '0 2rem',
           display: 'flex',
-          gap: '0.5rem'
+          gap: '0.5rem',
+          flexWrap: 'wrap'
         }}
       >
         {tabs.map(tab => (
           <button
+            type="button"
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
               padding: '1rem 1.5rem',
               border: 'none',
               background:
-                activeTab === tab.id ? '#2563eb' : 'transparent',
+                activeTab === tab.id
+                  ? '#2563eb'
+                  : 'transparent',
               color:
-                activeTab === tab.id ? 'white' : '#64748b',
+                activeTab === tab.id
+                  ? 'white'
+                  : '#64748b',
               cursor: 'pointer',
-              fontWeight: '500',
+              fontWeight: 500,
               borderBottom:
                 activeTab === tab.id
                   ? '3px solid #2563eb'
@@ -262,138 +454,111 @@ const StudentDashboard = () => {
         ))}
       </div>
 
-      {/* Content */}
       <div
         style={{
           padding: '2rem',
-          maxWidth: '1200px',
+          maxWidth: 1200,
           margin: '0 auto'
         }}
       >
-        {/* Profile */}
-        {activeTab === 'profile' && (
-          <div>
-            <h2
-              style={{
-                fontSize: '1.5rem',
-                fontWeight: '700',
-                marginBottom: '1.5rem'
-              }}
-            >
-              My Profile
-            </h2>
+        {error && (
+          <p
+            role="alert"
+            className="badge badge-danger"
+            style={{ display: 'block', marginBottom: 12 }}
+          >
+            {error}
+          </p>
+        )}
 
-            <div className="card">
-              <h3
-                style={{
-                  fontSize: '1.1rem',
-                  fontWeight: '600',
-                  marginBottom: '1rem',
-                  color: '#2563eb'
-                }}
-              >
-                Personal Information
-              </h3>
+        {message && (
+          <p
+            role="status"
+            className="badge badge-success"
+            style={{ display: 'block', marginBottom: 12 }}
+          >
+            {message}
+          </p>
+        )}
 
-              <div className="form-row">
-                <div>
-                  <strong>Name:</strong> {profile?.full_name}
-                </div>
+        {/* Profile stays mounted to preserve unsaved inputs. */}
+        <div hidden={activeTab !== 'profile'}>
+          <h2
+            style={{
+              fontSize: '1.5rem',
+              marginBottom: '1.5rem'
+            }}
+          >
+            My Profile
+          </h2>
 
-                <div>
-                  <strong>Registration No:</strong>{' '}
-                  {profile?.registration_no || 'Not assigned'}
-                </div>
+          <ProfileEditor
+            role="student"
+            profile={profile}
+            onSaved={personal =>
+              setProfile(old => ({
+                ...old,
+                ...personal
+              }))
+            }
+          />
 
-                <div>
-                  <strong>Email:</strong> {profile?.email}
-                </div>
+          <div className="card">
+            <h3>Academic Information</h3>
+
+            <div className="form-row">
+              <div>
+                <strong>Registration:</strong>{' '}
+                {profile?.registration_no}
               </div>
 
-              <div className="form-row">
-                <div>
-                  <strong>Phone:</strong>{' '}
-                  {profile?.phone || 'Not provided'}
-                </div>
+              <div>
+                <strong>Program:</strong>{' '}
+                {profile?.program_name}
+              </div>
 
-                <div>
-                  <strong>Date of Birth:</strong>{' '}
-                  {profile?.date_of_birth
-                    ? new Date(
-                        profile.date_of_birth
-                      ).toLocaleDateString()
-                    : 'Not provided'}
-                </div>
-
-                <div>
-                  <strong>Status:</strong>{' '}
-                  <span
-                    className={`badge badge-${
-                      profile?.current_status === 'active'
-                        ? 'success'
-                        : 'danger'
-                    }`}
-                  >
-                    {profile?.current_status}
-                  </span>
-                </div>
+              <div>
+                <strong>Department:</strong>{' '}
+                {profile?.department_name}
               </div>
             </div>
 
-            <div className="card">
-              <h3
-                style={{
-                  fontSize: '1.1rem',
-                  fontWeight: '600',
-                  marginBottom: '1rem',
-                  color: '#2563eb'
-                }}
-              >
-                Academic Information
-              </h3>
-
-              <div className="form-row">
-                <div>
-                  <strong>Program:</strong>{' '}
-                  {profile?.program_name}
-                </div>
-
-                <div>
-                  <strong>Department:</strong>{' '}
-                  {profile?.department_name}
-                </div>
-
-                <div>
-                  <strong>Degree:</strong>{' '}
-                  {profile?.degree_level}
-                </div>
+            <div className="form-row">
+              <div>
+                <strong>Degree:</strong>{' '}
+                {profile?.degree_level}
               </div>
 
-              <div className="form-row">
-                <div>
-                  <strong>Advisor:</strong>{' '}
-                  {profile?.advisor_name || 'Not assigned'}
-                </div>
+              <div>
+                <strong>Advisor:</strong>{' '}
+                {profile?.advisor_name || 'Not assigned'}
+              </div>
 
-                <div>
-                  <strong>CGPA:</strong>{' '}
-                  {parseFloat(
-                    profile?.current_cgpa || 0
-                  ).toFixed(2)}
-                </div>
+              <div>
+                <strong>CGPA:</strong>{' '}
+                {Number(
+                  profile?.current_cgpa || 0
+                ).toFixed(2)}
+              </div>
+            </div>
 
-                <div>
-                  <strong>Admission Date:</strong>{' '}
-                  {profile?.admission_date
-                    ? new Date(
-                        profile.admission_date
-                      ).toLocaleDateString()
-                    : 'N/A'}
-                </div>
+            <div className="form-row">
+              <div>
+                <strong>Admission date:</strong>{' '}
+                {profile?.admission_date
+                  ? new Date(
+                      profile.admission_date
+                    ).toLocaleDateString()
+                  : 'N/A'}
+              </div>
+
+              <div>
+                <strong>Status:</strong>{' '}
+                {profile?.current_status}
               </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Courses */}
         {activeTab === 'courses' && (
@@ -401,58 +566,71 @@ const StudentDashboard = () => {
             <h2
               style={{
                 fontSize: '1.5rem',
-                fontWeight: '700',
                 marginBottom: '1.5rem'
               }}
             >
               Course Registration
             </h2>
 
-            {/* Existing enrollments */}
+            <CoursePaymentPanel
+              enrollments={enrollments}
+              enabled={paymentConfig.enabled}
+              busy={paying}
+              onPay={openPayment}
+            />
+
             <div
               className="card"
               style={{ marginBottom: '1.5rem' }}
             >
-              <h3
-                style={{
-                  fontSize: '1.1rem',
-                  fontWeight: '600',
-                  marginBottom: '1rem',
-                  color: '#10b981'
-                }}
-              >
-                ✓ My Enrolled Courses
-              </h3>
+              <h3>My Enrolled Courses</h3>
 
-              {enrollments.length > 0 ? (
+              {confirmedEnrollments.length ? (
                 <div className="table-container">
                   <table>
                     <thead>
                       <tr>
                         <th>Course</th>
-                        <th>Year/Term</th>
+                        <th>Year / term</th>
                         <th>Credits</th>
                         <th>Status</th>
                       </tr>
                     </thead>
 
                     <tbody>
-                      {enrollments.map(e => (
-                        <tr key={e.enrollment_id}>
-                          <td>
-                            {e.course_code} - {e.course_title}
-                          </td>
-                          <td>
-                            {e.academic_year} / {e.term}
-                          </td>
-                          <td>{e.credit_hours}</td>
-                          <td>
-                            <span className="badge badge-success">
-                              {e.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {confirmedEnrollments.map(
+                        enrollment => (
+                          <tr key={enrollment.enrollment_id}>
+                            <td>
+                              {enrollment.course_code}
+                              {' — '}
+                              {enrollment.course_title}
+                            </td>
+
+                            <td>
+                              {enrollment.academic_year}
+                              {' / '}
+                              {enrollment.term}
+                            </td>
+
+                            <td>
+                              {enrollment.credit_hours}
+                            </td>
+
+                            <td>
+                              <span
+                                className={`badge badge-${
+                                  enrollment.status === 'dropped'
+                                    ? 'danger'
+                                    : 'success'
+                                }`}
+                              >
+                                {enrollment.status}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -463,92 +641,89 @@ const StudentDashboard = () => {
               )}
             </div>
 
-            {/* Pending requests */}
             <div
               className="card"
               style={{ marginBottom: '1.5rem' }}
             >
-              <h3
-                style={{
-                  fontSize: '1.1rem',
-                  fontWeight: '600',
-                  marginBottom: '1rem',
-                  color: '#f59e0b'
-                }}
-              >
-                ⏳ Pending Requests
-              </h3>
+              <h3>My course requests — live status</h3>
 
-              {courseRequests.filter(
-                r => r.status === 'pending'
-              ).length > 0 ? (
+              {courseRequests.length ? (
                 <div className="table-container">
                   <table>
                     <thead>
                       <tr>
                         <th>Course</th>
-                        <th>Requested On</th>
+                        <th>Year / term</th>
                         <th>Status</th>
+                        <th>Decision / reason</th>
                       </tr>
                     </thead>
 
                     <tbody>
-                      {courseRequests
-                        .filter(r => r.status === 'pending')
-                        .map(r => (
-                          <tr key={r.request_id}>
-                            <td>
-                              {r.course_code} - {r.course_title}
-                            </td>
-                            <td>
-                              {new Date(
-                                r.requested_on
-                              ).toLocaleDateString()}
-                            </td>
-                            <td>
-                              <span className="badge badge-warning">
-                                Pending
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                      {courseRequests.map(request => (
+                        <tr key={request.request_id}>
+                          <td>
+                            {request.course_code}
+                            {' — '}
+                            {request.course_title}
+                          </td>
+
+                          <td>
+                            {request.academic_year}
+                            {' / '}
+                            {request.term}
+                          </td>
+
+                          <td>
+                            <span
+                              className={`badge badge-${
+                                request.status === 'approved'
+                                  ? 'success'
+                                  : request.status === 'rejected'
+                                    ? 'danger'
+                                    : 'warning'
+                              }`}
+                            >
+                              {request.status}
+                            </span>
+                          </td>
+
+                          <td>
+                            {requestDecision(request)}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
               ) : (
                 <p className="empty-state">
-                  No pending requests
+                  No course requests yet
                 </p>
               )}
             </div>
 
-            {/* Request new courses */}
             <div className="card">
-              <h3
-                style={{
-                  fontSize: '1.1rem',
-                  fontWeight: '600',
-                  marginBottom: '1rem',
-                  color: '#2563eb'
-                }}
-              >
-                📚 Request New Courses
-              </h3>
+              <h3>Request New Courses</h3>
 
               <div
                 className="form-row"
                 style={{ marginBottom: '1rem' }}
               >
                 <div className="form-group">
-                  <label className="form-label">
+                  <label
+                    className="form-label"
+                    htmlFor="student-course-level"
+                  >
                     Filter by Level
                   </label>
 
                   <select
+                    id="student-course-level"
                     className="form-select"
                     value={selectedLevel}
-                    onChange={e =>
-                      setSelectedLevel(e.target.value)
+                    onChange={event =>
+                      setSelectedLevel(event.target.value)
                     }
                   >
                     <option value="">All Levels</option>
@@ -560,14 +735,20 @@ const StudentDashboard = () => {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">
+                  <label
+                    className="form-label"
+                    htmlFor="student-course-year"
+                  >
                     Academic Year
                   </label>
 
                   <select
+                    id="student-course-year"
                     className="form-select"
                     value={regYear}
-                    onChange={e => setRegYear(e.target.value)}
+                    onChange={event =>
+                      setRegYear(event.target.value)
+                    }
                   >
                     {academicYears.map(year => (
                       <option key={year} value={year}>
@@ -578,12 +759,20 @@ const StudentDashboard = () => {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Term</label>
+                  <label
+                    className="form-label"
+                    htmlFor="student-course-term"
+                  >
+                    Term
+                  </label>
 
                   <select
+                    id="student-course-term"
                     className="form-select"
                     value={regTerm}
-                    onChange={e => setRegTerm(e.target.value)}
+                    onChange={event =>
+                      setRegTerm(event.target.value)
+                    }
                   >
                     <option value="Fall">Fall</option>
                     <option value="Spring">Spring</option>
@@ -598,54 +787,118 @@ const StudentDashboard = () => {
                       <th>Course Code</th>
                       <th>Course Title</th>
                       <th>Credits</th>
-                      <th>Level/Term</th>
+                      <th>Level / term</th>
                       <th>Action</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {availableCourses.map(c => {
-                      const isEnrolled = enrollments.some(e =>
-                        e.course_id === c.course_id &&
-                        e.academic_year === regYear &&
-                        e.term === regTerm
-                      )
+                    {availableCourses.map(course => {
+                      const currentEnrollment =
+                        enrollments.find(enrollment =>
+                          enrollment.course_id ===
+                            course.course_id &&
+                          enrollment.academic_year === regYear &&
+                          enrollment.term === regTerm
+                        )
 
-                      const hasPending = courseRequests.some(r =>
-                        r.course_id === c.course_id &&
-                        r.academic_year === regYear &&
-                        r.term === regTerm &&
-                        r.status === 'pending'
-                      )
+                      const hasPending =
+                        courseRequests.some(request =>
+                          request.course_id ===
+                            course.course_id &&
+                          request.academic_year === regYear &&
+                          request.term === regTerm &&
+                          request.status === 'pending'
+                        )
 
                       return (
-                        <tr key={c.course_id}>
-                          <td>{c.course_code}</td>
-                          <td>{c.course_title}</td>
-                          <td>{c.credit_hours}</td>
+                        <tr key={course.course_id}>
+                          <td>{course.course_code}</td>
+                          <td>{course.course_title}</td>
+                          <td>{course.credit_hours}</td>
 
                           <td>
-                            Level {getLevelFromTerm(c.term_no)}
-                            /Term {c.term_no % 2 || 2}
+                            Level {Math.ceil(course.term_no / 2)}
+                            /Term {course.term_no % 2 || 2}
                           </td>
 
                           <td>
-                            {isEnrolled ? (
-                              <span className="badge badge-success">
-                                Enrolled
+                            {currentEnrollment?.status ===
+                              'pending_payment' ? (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'flex-start',
+                                  gap: '0.5rem'
+                                }}
+                              >
+                                <span className="badge badge-warning">
+                                  Pending Payment
+                                </span>
+
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  disabled={
+                                    paying ||
+                                    !paymentConfig.enabled
+                                  }
+                                  onClick={() =>
+                                    openPayment(
+                                      currentEnrollment
+                                    )
+                                  }
+                                >
+                                  Pay ৳1,000 (Demo)
+                                </button>
+
+                                {!paymentConfig.enabled && (
+                                  <small
+                                    style={{
+                                      color: '#dc2626'
+                                    }}
+                                  >
+                                    Demo payments are disabled
+                                    on the server.
+                                  </small>
+                                )}
+                              </div>
+                            ) : currentEnrollment ? (
+                              <span
+                                className={`badge badge-${
+                                  currentEnrollment.status ===
+                                    'dropped'
+                                    ? 'danger'
+                                    : 'success'
+                                }`}
+                              >
+                                {currentEnrollment.status ===
+                                  'enrolled'
+                                  ? 'Enrolled'
+                                  : currentEnrollment.status}
                               </span>
                             ) : hasPending ? (
                               <span className="badge badge-warning">
-                                Pending
+                                Pending approval
                               </span>
                             ) : (
                               <button
+                                type="button"
                                 className="btn btn-sm btn-primary"
+                                disabled={
+                                  requestingCourse !== null
+                                }
                                 onClick={() =>
-                                  handleRequestCourse(c.course_id)
+                                  handleRequestCourse(
+                                    course.course_id
+                                  )
                                 }
                               >
-                                Request
+                                {requestingCourse ===
+                                  course.course_id
+                                  ? 'Sending…'
+                                  : 'Request'}
                               </button>
                             )}
                           </td>
@@ -656,7 +909,7 @@ const StudentDashboard = () => {
                 </table>
               </div>
 
-              {availableCourses.length === 0 && (
+              {!availableCourses.length && (
                 <p className="empty-state">
                   Select a level to view courses
                 </p>
@@ -668,18 +921,10 @@ const StudentDashboard = () => {
         {/* Results */}
         {activeTab === 'results' && (
           <div>
-            <h2
-              style={{
-                fontSize: '1.5rem',
-                fontWeight: '700',
-                marginBottom: '1.5rem'
-              }}
-            >
-              My Results
-            </h2>
+            <h2>My Results</h2>
 
             <div className="card">
-              {exams.length > 0 ? (
+              {exams.length ? (
                 <div className="table-container">
                   <table>
                     <thead>
@@ -693,29 +938,29 @@ const StudentDashboard = () => {
                     </thead>
 
                     <tbody>
-                      {exams.map(ex => (
-                        <tr key={ex.exam_id}>
+                      {exams.map(exam => (
+                        <tr key={exam.exam_id}>
                           <td>
-                            {ex.course_code} - {ex.course_title}
+                            {exam.course_code}
+                            {' — '}
+                            {exam.course_title}
                           </td>
 
-                          <td>{ex.exam_type}</td>
+                          <td>{exam.exam_type}</td>
 
                           <td>
-                            {ex.obtained_marks ?? 'Not graded'}
-                            /{ex.total_marks}
-                          </td>
-
-                          <td>
-                            <strong style={{ fontSize: '1.2rem' }}>
-                              {ex.grade || '-'}
-                            </strong>
+                            {exam.obtained_marks ?? 'Not graded'}
+                            /{exam.total_marks}
                           </td>
 
                           <td>
-                            {ex.exam_date
+                            <strong>{exam.grade || '—'}</strong>
+                          </td>
+
+                          <td>
+                            {exam.exam_date
                               ? new Date(
-                                  ex.exam_date
+                                  exam.exam_date
                                 ).toLocaleDateString()
                               : 'N/A'}
                           </td>
@@ -736,110 +981,26 @@ const StudentDashboard = () => {
         {/* Payments */}
         {activeTab === 'payments' && (
           <div>
-            <h2
-              style={{
-                fontSize: '1.5rem',
-                fontWeight: '700',
-                marginBottom: '1.5rem'
-              }}
-            >
-              My Payments
-            </h2>
+            <h2>My Payments</h2>
 
-            <div
-              className="stats-grid"
-              style={{ marginBottom: '1.5rem' }}
-            >
-              <div className="stat-card">
-                <div className="stat-icon green">💰</div>
-                <div className="stat-value">
-                  ৳{totalPaid.toLocaleString()}
-                </div>
-                <div className="stat-label">Total Paid</div>
-              </div>
+            <CoursePaymentPanel
+              enrollments={enrollments}
+              enabled={paymentConfig.enabled}
+              busy={paying}
+              onPay={openPayment}
+            />
 
-              <div className="stat-card">
-                <div className="stat-icon blue">📋</div>
-                <div className="stat-value">
-                  {payments.length}
-                </div>
-                <div className="stat-label">Transactions</div>
-              </div>
-            </div>
-
-            <div className="card">
-              {payments.length > 0 ? (
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Type</th>
-                        <th>Year/Term</th>
-                        <th>Amount</th>
-                        <th>Date</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {payments.map(p => (
-                        <tr key={p.payment_id}>
-                          <td>{p.payment_type}</td>
-
-                          <td>
-                            {p.academic_year} / {p.term}
-                          </td>
-
-                          <td>
-                            ৳{parseFloat(p.amount).toLocaleString()}
-                          </td>
-
-                          <td>
-                            {new Date(
-                              p.paid_on
-                            ).toLocaleDateString()}
-                          </td>
-
-                          <td>
-                            <span
-                              className={`badge badge-${
-                                p.status === 'paid'
-                                  ? 'success'
-                                  : 'warning'
-                              }`}
-                            >
-                              {p.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="empty-state">
-                  No payment records
-                </p>
-              )}
-            </div>
+            <PaymentHistory payments={payments} />
           </div>
         )}
 
         {/* Scholarships */}
         {activeTab === 'scholarships' && (
           <div>
-            <h2
-              style={{
-                fontSize: '1.5rem',
-                fontWeight: '700',
-                marginBottom: '1.5rem'
-              }}
-            >
-              My Scholarships
-            </h2>
+            <h2>My Scholarships</h2>
 
             <div className="card">
-              {scholarships.length > 0 ? (
+              {scholarships.length ? (
                 <div className="table-container">
                   <table>
                     <thead>
@@ -848,31 +1009,38 @@ const StudentDashboard = () => {
                         <th>Type</th>
                         <th>Amount</th>
                         <th>Awarded</th>
-                        <th>Valid Until</th>
+                        <th>Valid until</th>
                         <th>Status</th>
                       </tr>
                     </thead>
 
                     <tbody>
-                      {scholarships.map(s => (
-                        <tr key={s.scholarship_id}>
-                          <td>{s.scholarship_name}</td>
-                          <td>{s.award_type}</td>
+                      {scholarships.map(scholarship => (
+                        <tr key={scholarship.scholarship_id}>
+                          <td>
+                            {scholarship.scholarship_name}
+                          </td>
+
+                          <td>{scholarship.award_type}</td>
 
                           <td>
-                            ৳{parseFloat(s.amount).toLocaleString()}
+                            ৳{Number(
+                              scholarship.amount || 0
+                            ).toLocaleString()}
                           </td>
 
                           <td>
-                            {new Date(
-                              s.awarded_on
-                            ).toLocaleDateString()}
-                          </td>
-
-                          <td>
-                            {s.valid_until
+                            {scholarship.awarded_on
                               ? new Date(
-                                  s.valid_until
+                                  scholarship.awarded_on
+                                ).toLocaleDateString()
+                              : 'N/A'}
+                          </td>
+
+                          <td>
+                            {scholarship.valid_until
+                              ? new Date(
+                                  scholarship.valid_until
                                 ).toLocaleDateString()
                               : 'N/A'}
                           </td>
@@ -880,12 +1048,12 @@ const StudentDashboard = () => {
                           <td>
                             <span
                               className={`badge badge-${
-                                s.status === 'active'
+                                scholarship.status === 'active'
                                   ? 'success'
                                   : 'secondary'
                               }`}
                             >
-                              {s.status}
+                              {scholarship.status}
                             </span>
                           </td>
                         </tr>
@@ -902,6 +1070,109 @@ const StudentDashboard = () => {
           </div>
         )}
       </div>
+
+      {/* Demo payment confirmation */}
+      {selectedPayment && (
+        <div
+          className="modal-overlay"
+          onClick={closePayment}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="demo-payment-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2
+                id="demo-payment-title"
+                className="modal-title"
+              >
+                Demo Course Payment
+              </h2>
+
+              <button
+                type="button"
+                className="modal-close"
+                aria-label="Close payment dialog"
+                disabled={paying}
+                onClick={closePayment}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <p>
+                <strong>
+                  {selectedPayment.course_code}
+                  {' — '}
+                  {selectedPayment.course_title}
+                </strong>
+              </p>
+
+              <p>
+                {selectedPayment.academic_year}
+                {' / '}
+                {selectedPayment.term}
+              </p>
+
+              <h3>
+                ৳{Number(
+                  selectedPayment.course_fee
+                ).toLocaleString()}
+              </h3>
+
+              <p>
+                This is a project demonstration.
+                No card, bank account or mobile-wallet
+                money will be charged.
+              </p>
+
+              <p>
+                Confirming records one demo receipt and
+                completes this course enrollment.
+              </p>
+
+              {paymentError && (
+                <p
+                  role="alert"
+                  className="badge badge-danger"
+                  style={{ display: 'block' }}
+                >
+                  {paymentError}
+                </p>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={paying}
+                onClick={closePayment}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={
+                  paying ||
+                  !paymentConfig.enabled
+                }
+                onClick={payCourse}
+              >
+                {paying
+                  ? 'Processing…'
+                  : 'Confirm demo payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

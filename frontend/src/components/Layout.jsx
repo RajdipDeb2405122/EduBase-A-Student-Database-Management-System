@@ -30,7 +30,7 @@ const Layout = () => {
             📥 Pending Requests
           </NavLink>
           <NavLink to="/faculty-requests" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-                Faculty Requests
+            🧑‍🏫 Faculty Requests
           </NavLink>
           <NavLink to="/course-registration-requests" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           📚 Course Requests

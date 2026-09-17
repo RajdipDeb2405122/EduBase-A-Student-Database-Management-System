@@ -9,7 +9,8 @@ export default function ProfileAvatar({
     borderRadius: '50%',
     flexShrink: 0,
     objectFit: 'cover',
-    border: '2px solid #dbeafe'
+    border: '2px solid var(--teal-400)',
+    boxShadow: 'var(--shadow-sm)'
   }
 
   if (src) {
@@ -30,7 +31,7 @@ export default function ProfileAvatar({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: '#2563eb',
+        background: 'linear-gradient(135deg, var(--navy-700), var(--teal-600))',
         color: 'white',
         fontWeight: 700,
         fontSize: size * 0.4

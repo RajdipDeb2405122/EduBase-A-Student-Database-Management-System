@@ -28,7 +28,7 @@ const StudentLogin = () => {
   return (
     <div style={{ 
       minHeight: '100vh', 
-      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+      background: 'linear-gradient(160deg, var(--navy-900) 0%, #123354 55%, #14486b 100%)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -44,7 +44,7 @@ const StudentLogin = () => {
       }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div style={{
-            width: '64px', height: '64px', background: '#2563eb', borderRadius: '16px',
+            width: '64px', height: '64px', background: 'linear-gradient(135deg, var(--teal-600), var(--teal-400))', borderRadius: '16px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: 'white', fontWeight: 'bold', fontSize: '2rem', margin: '0 auto 1rem'
           }}>E</div>
@@ -82,7 +82,7 @@ const StudentLogin = () => {
         </form>
 
         <div style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.875rem', color: '#64748b' }}>
-          Don't have an account? <Link to="/student-register" style={{ color: '#2563eb', fontWeight: '500' }}>Register here</Link>
+          Don't have an account? <Link to="/student-register" style={{ color: 'var(--accent)', fontWeight: '500' }}>Register here</Link>
         </div>
         
         <div style={{ marginTop: '1rem', textAlign: 'center', fontSize: '0.875rem', color: '#64748b' }}>

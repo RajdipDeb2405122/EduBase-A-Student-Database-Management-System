@@ -1,161 +1,130 @@
-const express = require('express');
+const router = require('express').Router();
 const pool = require('../config/database');
 const auth = require('../middleware/auth');
 
-const router = express.Router();
+const {
+  wrap,
+  id,
+  text,
+  check
+} = require('../lib/common');
 
-// Get all payments
-router.get('/', async (req, res) => {
-  try {
-    const { student_id, academic_year, term, status } = req.query;
-    let query = `
-      SELECT pay.*, s.registration_no, s.full_name as student_name
-      FROM payment pay
-      JOIN student s ON pay.student_id = s.student_id
-      WHERE 1=1
-    `;
-    const params = [];
-    let paramIndex = 1;
+const {
+  listPayments,
+  coursePaymentSQL
+} = require('../lib/courseFees');
 
-    if (student_id) {
-      query += ` AND pay.student_id = $${paramIndex}`;
-      params.push(student_id);
-      paramIndex++;
-    }
-    if (academic_year) {
-      query += ` AND pay.academic_year = $${paramIndex}`;
-      params.push(academic_year);
-      paramIndex++;
-    }
-    if (term) {
-      query += ` AND pay.term = $${paramIndex}`;
-      params.push(term);
-      paramIndex++;
-    }
-    if (status) {
-      query += ` AND pay.status = $${paramIndex}`;
-      params.push(status);
-      paramIndex++;
-    }
+router.use(auth, auth.requireAdmin);
 
-    query += ' ORDER BY pay.paid_on DESC';
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
 
-    const result = await pool.query(query, params);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    return res.status(403).json({
+      error:
+        'Administrators can only view payments. Course payments must be made by the student.'
+    });
   }
+
+  next();
 });
 
-// Get payment by ID
-router.get('/:id', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT pay.*, s.registration_no, s.full_name as student_name
-      FROM payment pay
-      JOIN student s ON pay.student_id = s.student_id
-      WHERE pay.payment_id = $1
-    `, [req.params.id]);
+router.get('/', wrap(async (req, res) => {
+  res.json(
+    await listPayments(pool, {
+      studentId: id(
+        req.query.student_id,
+        'student',
+        true
+      ),
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Payment not found' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      year: text(
+        req.query.academic_year,
+        'academic year',
+        20,
+        false
+      ),
 
-// Create payment
-router.post('/', auth, async (req, res) => {
-  try {
-    const { student_id, academic_year, term, payment_type, amount, paid_on, status } = req.body;
+      term: text(
+        req.query.term,
+        'term',
+        20,
+        false
+      ),
 
-    const result = await pool.query(
-      `INSERT INTO payment (student_id, academic_year, term, payment_type, amount, paid_on, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [student_id, academic_year, term, payment_type, amount, paid_on || new Date(), status || 'paid']
-    );
+      status: text(
+        req.query.status,
+        'status',
+        20,
+        false
+      )
+    })
+  );
+}));
 
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'payment', $2, 'CREATE', $3)`,
-      [req.admin.admin_id, result.rows[0].payment_id, `Recorded payment: ${payment_type} - ${amount}`]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Update payment
-router.put('/:id', auth, async (req, res) => {
-  try {
-    const { academic_year, term, payment_type, amount, paid_on, status } = req.body;
-
-    const result = await pool.query(
-      `UPDATE payment SET academic_year = $1, term = $2, payment_type = $3,
-       amount = $4, paid_on = $5, status = $6
-       WHERE payment_id = $7 RETURNING *`,
-      [academic_year, term, payment_type, amount, paid_on, status, req.params.id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Payment not found' });
-    }
-
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'payment', $2, 'UPDATE', $3)`,
-      [req.admin.admin_id, req.params.id, `Updated payment`]
-    );
-
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Delete payment
-router.delete('/:id', auth, async (req, res) => {
-  try {
-    const result = await pool.query(
-      'DELETE FROM payment WHERE payment_id = $1 RETURNING *',
-      [req.params.id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Payment not found' });
-    }
-
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, old_value)
-       VALUES ($1, 'payment', $2, 'DELETE', $3)`,
-      [req.admin.admin_id, req.params.id, `Deleted payment record`]
-    );
-
-    res.json({ message: 'Payment deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get payment summary
-router.get('/summary/total', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        COUNT(*) as total_payments,
-        COALESCE(SUM(amount), 0) as total_amount,
-        COALESCE(AVG(amount), 0) as average_amount
+router.get('/summary/total', wrap(async (req, res) => {
+  const [legacy, demo] = await Promise.all([
+    pool.query(`
+      SELECT
+        COUNT(*)::int AS total_payments,
+        COALESCE(SUM(amount),0) AS total_amount,
+        COALESCE(AVG(amount),0) AS average_amount
       FROM payment
-      WHERE status = 'paid'
-    `);
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      WHERE status='paid'
+    `),
+
+    pool.query(`
+      SELECT
+        COUNT(*)::int AS course_payments,
+        COALESCE(SUM(amount),0) AS demo_course_total
+      FROM course_payment
+    `)
+  ]);
+
+  res.json({
+    ...legacy.rows[0],
+    ...demo.rows[0]
+  });
+}));
+
+router.get('/course/:id', wrap(async (req, res) => {
+  const result = await pool.query(`
+    ${coursePaymentSQL}
+    WHERE cp.course_payment_id=$1
+  `, [id(req.params.id)]);
+
+  check(
+    result.rowCount,
+    'Payment not found',
+    404
+  );
+
+  res.json(result.rows[0]);
+}));
+
+// Preserve access to old identifiers for historical payment records.
+router.get('/:id', wrap(async (req, res) => {
+  const result = await pool.query(`
+    SELECT
+      p.*,
+      s.registration_no,
+      s.full_name AS student_name
+
+    FROM payment p
+
+    JOIN student s
+      ON s.student_id=p.student_id
+
+    WHERE p.payment_id=$1
+  `, [id(req.params.id)]);
+
+  check(
+    result.rowCount,
+    'Historical payment not found',
+    404
+  );
+
+  res.json(result.rows[0]);
+}));
 
 module.exports = router;

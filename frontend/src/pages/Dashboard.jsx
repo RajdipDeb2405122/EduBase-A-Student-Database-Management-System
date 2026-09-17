@@ -160,7 +160,11 @@ const Dashboard = () => {
                 <tbody>
                   {stats.recentPayments.map(payment => (
                     <tr key={payment.payment_id}>
-                      <td>{payment.full_name}</td>
+                      <td>
+                        {payment.student_name ||
+                          payment.full_name ||
+                          '—'}
+                      </td>
                       <td>{payment.payment_type}</td>
 
                       <td>
@@ -202,7 +206,7 @@ const Dashboard = () => {
 
             <div
               className="stat-value"
-              style={{ color: '#10b981' }}
+              style={{ color: 'var(--success)' }}
             >
               {stats?.totalPayments?.toLocaleString() || 0}
             </div>
@@ -215,7 +219,7 @@ const Dashboard = () => {
 
             <div
               className="stat-value"
-              style={{ color: '#f59e0b' }}
+              style={{ color: 'var(--warning)' }}
             >
               {stats?.totalScholarships?.toLocaleString() || 0}
             </div>

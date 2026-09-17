@@ -12,6 +12,8 @@ import useViewState from '../hooks/useViewState'
 import api from '../api'
 import ProfileEditor from '../components/ProfileEditor'
 import ProfileAvatar from '../components/ProfileAvatar'
+import CoursePaymentPanel from '../components/CoursePaymentPanel'
+import PaymentHistory from '../components/PaymentHistory'
 
 const StudentDashboard = () => {
   const { student, logout } = useStudentAuth()
@@ -44,8 +46,8 @@ const StudentDashboard = () => {
       regYear,
       ...Array.from(
         { length: 5 },
-        (_, i) =>
-          `${currentYear + 1 - i}-${currentYear + 2 - i}`
+        (_, index) =>
+          `${currentYear + 1 - index}-${currentYear + 2 - index}`
       )
     ])
   ].sort((a, b) => b.localeCompare(a))
@@ -63,6 +65,14 @@ const StudentDashboard = () => {
   const [message, setMessage] = useState('')
   const [requestingCourse, setRequestingCourse] = useState(null)
 
+  const [paymentConfig, setPaymentConfig] = useState({
+    enabled: false
+  })
+
+  const [selectedPayment, setSelectedPayment] = useState(null)
+  const [paying, setPaying] = useState(false)
+  const [paymentError, setPaymentError] = useState('')
+
   const dataVersion = useRef(0)
   const coursesVersion = useRef(0)
 
@@ -79,7 +89,8 @@ const StudentDashboard = () => {
         results,
         paid,
         awards,
-        personal
+        personal,
+        paymentOptions
       ] = await Promise.all([
         api.get(`/student-auth/me/${studentId}`),
         api.get(`/student-auth/me/${studentId}/enrollments`),
@@ -87,7 +98,8 @@ const StudentDashboard = () => {
         api.get(`/student-auth/me/${studentId}/exams`),
         api.get(`/student-auth/me/${studentId}/payments`),
         api.get(`/student-auth/me/${studentId}/scholarships`),
-        api.get('/profile/me', { role: 'student' })
+        api.get('/profile/me', { role: 'student' }),
+        api.get('/student-payments/config', { role: 'student' })
       ])
 
       if (version !== dataVersion.current) return
@@ -102,10 +114,11 @@ const StudentDashboard = () => {
       setExams(results.data)
       setPayments(paid.data)
       setScholarships(awards.data)
+      setPaymentConfig(paymentOptions.data)
       setError('')
-    } catch (err) {
+    } catch (error) {
       if (version === dataVersion.current) {
-        setError(err.message)
+        setError(error.message)
       }
     } finally {
       if (version === dataVersion.current) {
@@ -131,9 +144,9 @@ const StudentDashboard = () => {
       if (version === coursesVersion.current) {
         setAvailableCourses(data)
       }
-    } catch (err) {
+    } catch (error) {
       if (version === coursesVersion.current) {
-        setError(err.message)
+        setError(error.message)
       }
     }
   }, [studentId, selectedLevel])
@@ -184,10 +197,42 @@ const StudentDashboard = () => {
       )
 
       await loadProfile()
-    } catch (err) {
-      setError(err.message)
+    } catch (error) {
+      setError(error.message)
     } finally {
       setRequestingCourse(null)
+    }
+  }
+
+  const openPayment = enrollment => {
+    setPaymentError('')
+    setSelectedPayment(enrollment)
+  }
+
+  const payCourse = async () => {
+    if (!selectedPayment || paying) return
+
+    setPaying(true)
+    setPaymentError('')
+
+    try {
+      const { data } = await api.post(
+        `/student-payments/enrollments/${selectedPayment.enrollment_id}/pay`,
+        { confirm: true },
+        { role: 'student' }
+      )
+
+      setSelectedPayment(null)
+
+      setMessage(
+        `${data.message} Receipt: ${data.payment.receipt_no}`
+      )
+
+      await loadProfile()
+    } catch (error) {
+      setPaymentError(error.message)
+    } finally {
+      setPaying(false)
     }
   }
 
@@ -200,13 +245,9 @@ const StudentDashboard = () => {
     return <div className="spinner" />
   }
 
-  const totalPaid = payments.reduce(
-    (sum, payment) => sum + parseFloat(payment.amount),
-    0
+  const confirmedEnrollments = enrollments.filter(
+    enrollment => enrollment.status !== 'pending_payment'
   )
-
-  const getLevelFromTerm = termNo =>
-    Math.ceil(termNo / 2)
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: '👤' },
@@ -216,143 +257,90 @@ const StudentDashboard = () => {
     { id: 'scholarships', label: 'Scholarships', icon: '🎓' }
   ]
 
+  const requestDecision = request => {
+    if (request.status !== 'approved') {
+      return request.rejection_reason || 'Awaiting admin review'
+    }
+
+    if (request.enrollment_status === 'pending_payment') {
+      return 'Pending Payment — ৳1,000'
+    }
+
+    if (request.enrollment_status === 'enrolled') {
+      return 'Enrolled'
+    }
+
+    return request.enrollment_status || 'Contact registrar'
+  }
+
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#f8fafc'
-    }}>
-      <div style={{
-        background: 'white',
-        borderBottom: '1px solid #e2e8f0',
-        padding: '1rem 2rem',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '1rem'
-        }}>
-          <div style={{
-            width: '40px',
-            height: '40px',
-            background: '#2563eb',
-            borderRadius: '10px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'white',
-            fontWeight: 'bold',
-            fontSize: '1.2rem'
-          }}>
-            E
-          </div>
-
-          <span style={{
-            fontSize: '1.25rem',
-            fontWeight: '700'
-          }}>
-            EduBase Student Portal
-          </span>
-        </div>
-
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '1rem'
-        }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontWeight: '600' }}>
-              {profile?.full_name}
-            </div>
-
-            {profile?.bengali_name && (
-              <div lang="bn">
-                {profile.bengali_name}
-              </div>
-            )}
-
-            <div style={{
-              fontSize: '0.8rem',
-              color: '#64748b'
-            }}>
-              {profile?.registration_no}
-            </div>
-          </div>
-
+    <div className="portal-page">
+      <header className="page-header">
+        <div className="portal-identity">
           <ProfileAvatar
             src={profile?.profile_photo}
             name={profile?.full_name || ''}
-            size={44}
+            size={60}
           />
 
-          <button
-            className="btn btn-secondary"
-            onClick={handleLogout}
-          >
-            Logout
-          </button>
-        </div>
-      </div>
+          <div>
+            <h1 className="page-title">
+              Student dashboard
+            </h1>
 
-      <div style={{
-        background: 'white',
-        borderBottom: '1px solid #e2e8f0',
-        padding: '0 2rem',
-        display: 'flex',
-        gap: '0.5rem',
-        flexWrap: 'wrap'
-      }}>
+            <p>
+              {profile?.full_name}
+              {profile?.registration_no && ` · ${profile.registration_no}`}
+              {profile?.program_name && ` · ${profile.program_name}`}
+            </p>
+
+            {profile?.bengali_name && (
+              <p lang="bn">
+                {profile.bengali_name}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <button
+          className="btn btn-secondary"
+          onClick={handleLogout}
+        >
+          Log out
+        </button>
+      </header>
+
+      <nav className="tab-nav">
         {tabs.map(tab => (
           <button
             key={tab.id}
+            className={`btn ${
+              activeTab === tab.id
+                ? 'btn-primary'
+                : 'btn-secondary'
+            }`}
             onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: '1rem 1.5rem',
-              border: 'none',
-              background: activeTab === tab.id
-                ? '#2563eb'
-                : 'transparent',
-              color: activeTab === tab.id
-                ? 'white'
-                : '#64748b',
-              cursor: 'pointer',
-              fontWeight: '500',
-              borderBottom: activeTab === tab.id
-                ? '3px solid #2563eb'
-                : '3px solid transparent',
-              marginBottom: '-1px'
-            }}
           >
             {tab.icon} {tab.label}
           </button>
         ))}
-      </div>
+      </nav>
 
-      <div style={{
-        padding: '2rem',
-        maxWidth: '1200px',
-        margin: '0 auto'
-      }}>
+      <div>
         {error && (
-          <p role="alert" className="badge badge-danger">
+          <p role="alert" className="badge badge-danger" style={{ display: 'block', marginBottom: 16 }}>
             {error} — retrying automatically.
           </p>
         )}
 
         {message && (
-          <p role="status" className="badge badge-success">
+          <p role="status" className="badge badge-success" style={{ display: 'block', marginBottom: 16 }}>
             {message}
           </p>
         )}
 
         <div hidden={activeTab !== 'profile'}>
-          <h2 style={{
-            fontSize: '1.5rem',
-            fontWeight: '700',
-            marginBottom: '1.5rem'
-          }}>
+          <h2 className="section-title">
             My Profile
           </h2>
 
@@ -368,18 +356,11 @@ const StudentDashboard = () => {
           />
 
           <div className="card">
-            <h3 style={{
-              fontSize: '1.1rem',
-              fontWeight: '600',
-              marginBottom: '1rem',
-              color: '#2563eb'
-            }}>
-              Academic Information
-            </h3>
+            <h3>Academic Information</h3>
 
             <div className="form-row">
               <div>
-                <strong>Registration No:</strong>{' '}
+                <strong>Registration:</strong>{' '}
                 {profile?.registration_no}
               </div>
 
@@ -407,7 +388,7 @@ const StudentDashboard = () => {
 
               <div>
                 <strong>CGPA:</strong>{' '}
-                {parseFloat(
+                {Number(
                   profile?.current_cgpa || 0
                 ).toFixed(2)}
               </div>
@@ -415,7 +396,7 @@ const StudentDashboard = () => {
 
             <div className="form-row">
               <div>
-                <strong>Admission Date:</strong>{' '}
+                <strong>Admission date:</strong>{' '}
                 {profile?.admission_date
                   ? new Date(
                       profile.admission_date
@@ -435,43 +416,42 @@ const StudentDashboard = () => {
           <div>
             <h2 style={{
               fontSize: '1.5rem',
-              fontWeight: '700',
               marginBottom: '1.5rem'
             }}>
               Course Registration
             </h2>
 
+            <CoursePaymentPanel
+              enrollments={enrollments}
+              enabled={paymentConfig.enabled}
+              busy={paying}
+              onPay={openPayment}
+            />
+
             <div
               className="card"
               style={{ marginBottom: '1.5rem' }}
             >
-              <h3 style={{
-                fontSize: '1.1rem',
-                fontWeight: '600',
-                marginBottom: '1rem',
-                color: '#10b981'
-              }}>
-                My Enrolled Courses
-              </h3>
+              <h3>My Enrolled Courses</h3>
 
-              {enrollments.length ? (
+              {confirmedEnrollments.length ? (
                 <div className="table-container">
                   <table>
                     <thead>
                       <tr>
                         <th>Course</th>
-                        <th>Year/Term</th>
+                        <th>Year / term</th>
                         <th>Credits</th>
                         <th>Status</th>
                       </tr>
                     </thead>
 
                     <tbody>
-                      {enrollments.map(enrollment => (
+                      {confirmedEnrollments.map(enrollment => (
                         <tr key={enrollment.enrollment_id}>
                           <td>
                             {enrollment.course_code}
-                            {' - '}
+                            {' — '}
                             {enrollment.course_title}
                           </td>
 
@@ -484,7 +464,11 @@ const StudentDashboard = () => {
                           <td>{enrollment.credit_hours}</td>
 
                           <td>
-                            <span className="badge badge-success">
+                            <span className={`badge badge-${
+                              enrollment.status === 'dropped'
+                                ? 'danger'
+                                : 'success'
+                            }`}>
                               {enrollment.status}
                             </span>
                           </td>
@@ -545,12 +529,7 @@ const StudentDashboard = () => {
                             </span>
                           </td>
 
-                          <td>
-                            {request.status === 'approved'
-                              ? 'Enrolled'
-                              : request.rejection_reason ||
-                                'Awaiting admin review'}
-                          </td>
+                          <td>{requestDecision(request)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -564,14 +543,7 @@ const StudentDashboard = () => {
             </div>
 
             <div className="card">
-              <h3 style={{
-                fontSize: '1.1rem',
-                fontWeight: '600',
-                marginBottom: '1rem',
-                color: '#2563eb'
-              }}>
-                Request New Courses
-              </h3>
+              <h3>Request New Courses</h3>
 
               <div
                 className="form-row"
@@ -585,8 +557,8 @@ const StudentDashboard = () => {
                   <select
                     className="form-select"
                     value={selectedLevel}
-                    onChange={e =>
-                      setSelectedLevel(e.target.value)
+                    onChange={event =>
+                      setSelectedLevel(event.target.value)
                     }
                   >
                     <option value="">All Levels</option>
@@ -605,8 +577,8 @@ const StudentDashboard = () => {
                   <select
                     className="form-select"
                     value={regYear}
-                    onChange={e =>
-                      setRegYear(e.target.value)
+                    onChange={event =>
+                      setRegYear(event.target.value)
                     }
                   >
                     {academicYears.map(year => (
@@ -625,8 +597,8 @@ const StudentDashboard = () => {
                   <select
                     className="form-select"
                     value={regTerm}
-                    onChange={e =>
-                      setRegTerm(e.target.value)
+                    onChange={event =>
+                      setRegTerm(event.target.value)
                     }
                   >
                     <option value="Fall">Fall</option>
@@ -642,19 +614,19 @@ const StudentDashboard = () => {
                       <th>Course Code</th>
                       <th>Course Title</th>
                       <th>Credits</th>
-                      <th>Level/Term</th>
+                      <th>Level / term</th>
                       <th>Action</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     {availableCourses.map(course => {
-                      const isEnrolled = enrollments.some(
-                        enrollment =>
+                      const currentEnrollment =
+                        enrollments.find(enrollment =>
                           enrollment.course_id === course.course_id &&
                           enrollment.academic_year === regYear &&
                           enrollment.term === regTerm
-                      )
+                        )
 
                       const hasPending = courseRequests.some(
                         request =>
@@ -671,18 +643,29 @@ const StudentDashboard = () => {
                           <td>{course.credit_hours}</td>
 
                           <td>
-                            Level {getLevelFromTerm(course.term_no)}
+                            Level {Math.ceil(course.term_no / 2)}
                             /Term {course.term_no % 2 || 2}
                           </td>
 
                           <td>
-                            {isEnrolled ? (
-                              <span className="badge badge-success">
-                                Enrolled
+                            {currentEnrollment?.status ===
+                              'pending_payment' ? (
+                              <span className="badge badge-warning">
+                                Pending Payment — pay above
+                              </span>
+                            ) : currentEnrollment ? (
+                              <span className={`badge badge-${
+                                currentEnrollment.status === 'dropped'
+                                  ? 'danger'
+                                  : 'success'
+                              }`}>
+                                {currentEnrollment.status === 'enrolled'
+                                  ? 'Enrolled'
+                                  : currentEnrollment.status}
                               </span>
                             ) : hasPending ? (
                               <span className="badge badge-warning">
-                                Pending
+                                Pending approval
                               </span>
                             ) : (
                               <button
@@ -716,13 +699,7 @@ const StudentDashboard = () => {
 
         {activeTab === 'results' && (
           <div>
-            <h2 style={{
-              fontSize: '1.5rem',
-              fontWeight: '700',
-              marginBottom: '1.5rem'
-            }}>
-              My Results
-            </h2>
+            <h2>My Results</h2>
 
             <div className="card">
               {exams.length ? (
@@ -743,7 +720,7 @@ const StudentDashboard = () => {
                         <tr key={exam.exam_id}>
                           <td>
                             {exam.course_code}
-                            {' - '}
+                            {' — '}
                             {exam.course_title}
                           </td>
 
@@ -754,11 +731,7 @@ const StudentDashboard = () => {
                             /{exam.total_marks}
                           </td>
 
-                          <td>
-                            <strong style={{ fontSize: '1.2rem' }}>
-                              {exam.grade || '-'}
-                            </strong>
-                          </td>
+                          <td>{exam.grade || '—'}</td>
 
                           <td>
                             {exam.exam_date
@@ -783,104 +756,22 @@ const StudentDashboard = () => {
 
         {activeTab === 'payments' && (
           <div>
-            <h2 style={{
-              fontSize: '1.5rem',
-              fontWeight: '700',
-              marginBottom: '1.5rem'
-            }}>
-              My Payments
-            </h2>
+            <h2>My Payments</h2>
 
-            <div
-              className="stats-grid"
-              style={{ marginBottom: '1.5rem' }}
-            >
-              <div className="stat-card">
-                <div className="stat-icon green">💰</div>
-                <div className="stat-value">
-                  ৳{totalPaid.toLocaleString()}
-                </div>
-                <div className="stat-label">Total Paid</div>
-              </div>
+            <CoursePaymentPanel
+              enrollments={enrollments}
+              enabled={paymentConfig.enabled}
+              busy={paying}
+              onPay={openPayment}
+            />
 
-              <div className="stat-card">
-                <div className="stat-icon blue">📋</div>
-                <div className="stat-value">
-                  {payments.length}
-                </div>
-                <div className="stat-label">Transactions</div>
-              </div>
-            </div>
-
-            <div className="card">
-              {payments.length ? (
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Type</th>
-                        <th>Year/Term</th>
-                        <th>Amount</th>
-                        <th>Date</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {payments.map(payment => (
-                        <tr key={payment.payment_id}>
-                          <td>{payment.payment_type}</td>
-
-                          <td>
-                            {payment.academic_year}
-                            {' / '}
-                            {payment.term}
-                          </td>
-
-                          <td>
-                            ৳{parseFloat(
-                              payment.amount
-                            ).toLocaleString()}
-                          </td>
-
-                          <td>
-                            {new Date(
-                              payment.paid_on
-                            ).toLocaleDateString()}
-                          </td>
-
-                          <td>
-                            <span className={`badge badge-${
-                              payment.status === 'paid'
-                                ? 'success'
-                                : 'warning'
-                            }`}>
-                              {payment.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="empty-state">
-                  No payment records
-                </p>
-              )}
-            </div>
+            <PaymentHistory payments={payments} />
           </div>
         )}
 
         {activeTab === 'scholarships' && (
           <div>
-            <h2 style={{
-              fontSize: '1.5rem',
-              fontWeight: '700',
-              marginBottom: '1.5rem'
-            }}>
-              My Scholarships
-            </h2>
+            <h2>My Scholarships</h2>
 
             <div className="card">
               {scholarships.length ? (
@@ -892,7 +783,7 @@ const StudentDashboard = () => {
                         <th>Type</th>
                         <th>Amount</th>
                         <th>Awarded</th>
-                        <th>Valid Until</th>
+                        <th>Valid until</th>
                         <th>Status</th>
                       </tr>
                     </thead>
@@ -904,15 +795,17 @@ const StudentDashboard = () => {
                           <td>{scholarship.award_type}</td>
 
                           <td>
-                            ৳{parseFloat(
-                              scholarship.amount
+                            ৳{Number(
+                              scholarship.amount || 0
                             ).toLocaleString()}
                           </td>
 
                           <td>
-                            {new Date(
-                              scholarship.awarded_on
-                            ).toLocaleDateString()}
+                            {scholarship.awarded_on
+                              ? new Date(
+                                  scholarship.awarded_on
+                                ).toLocaleDateString()
+                              : 'N/A'}
                           </td>
 
                           <td>
@@ -923,15 +816,7 @@ const StudentDashboard = () => {
                               : 'N/A'}
                           </td>
 
-                          <td>
-                            <span className={`badge badge-${
-                              scholarship.status === 'active'
-                                ? 'success'
-                                : 'secondary'
-                            }`}>
-                              {scholarship.status}
-                            </span>
-                          </td>
+                          <td>{scholarship.status}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -946,6 +831,82 @@ const StudentDashboard = () => {
           </div>
         )}
       </div>
+
+      {selectedPayment && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            if (!paying) setSelectedPayment(null)
+          }}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-payment-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="course-payment-title">
+                Course Payment
+              </h2>
+            </div>
+
+            <div className="modal-body">
+              <p>
+                <strong>
+                  {selectedPayment.course_code}
+                  {' — '}
+                  {selectedPayment.course_title}
+                </strong>
+              </p>
+
+              <p>
+                {selectedPayment.academic_year}
+                {' / '}
+                {selectedPayment.term}
+              </p>
+
+              <h3>
+                ৳{Number(
+                  selectedPayment.course_fee
+                ).toLocaleString()}
+              </h3>
+
+              <p>
+                Confirming records your receipt and completes
+                this course enrollment.
+              </p>
+
+              {paymentError && (
+                <p role="alert" className="badge badge-danger">
+                  {paymentError}
+                </p>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                className="btn btn-secondary"
+                disabled={paying}
+                onClick={() => setSelectedPayment(null)}
+              >
+                Cancel
+              </button>
+
+              <button
+                className="btn btn-primary"
+                disabled={paying || !paymentConfig.enabled}
+                onClick={payCourse}
+              >
+                {paying
+                  ? 'Processing…'
+                  : 'Confirm payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -23,7 +23,9 @@ const pool = require('../config/database');
     const migrations = [
       '002_users_faculty',
       '003_persistent_sessions',
-      '004_profile_details'
+      '004_profile_details',
+      '005_course_fee_payments',
+      '006_course_teachers'
     ];
 
     for (const name of migrations) {

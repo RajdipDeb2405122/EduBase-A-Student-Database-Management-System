@@ -76,7 +76,7 @@ export default function CourseRegistrationRequests() {
 
       setMessage(
         action === 'approve'
-          ? 'Approved. The student’s enrollment updates automatically.'
+          ? 'Approved. The student now sees Pending Payment and must pay the ৳1000 course fee.'
           : 'Rejected. The student can see the decision and reason.'
       )
 
@@ -222,9 +222,16 @@ export default function CourseRegistrationRequests() {
                       </button>
                     </>
                   ) : (
-                    request.rejection_reason ||
-                    `Reviewed by ${request.reviewed_by_name || 'Admin'}`
-                  )}
+                    request.status === 'approved'
+  ? (
+      request.enrollment_status === 'pending_payment'
+        ? 'Pending Payment — ৳1,000'
+        : request.enrollment_status === 'enrolled'
+          ? 'Enrolled'
+          : request.enrollment_status || 'Approved'
+    )
+  : request.rejection_reason ||
+    `Reviewed by ${request.reviewed_by_name || 'Admin'}`)}
                 </td>
               </tr>
             ))}

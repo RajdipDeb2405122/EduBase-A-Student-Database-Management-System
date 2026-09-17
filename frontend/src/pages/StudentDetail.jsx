@@ -99,11 +99,11 @@ const StudentDetail = () => {
           <h3 className="card-title">Financial Summary</h3>
           <div style={{ marginBottom: '1rem' }}>
             <div className="stat-label">Total Payments</div>
-            <div className="stat-value" style={{ color: '#10b981' }}>৳{totalPaid.toLocaleString()}</div>
+            <div className="stat-value" style={{ color: 'var(--success)' }}>৳{totalPaid.toLocaleString()}</div>
           </div>
           <div>
             <div className="stat-label">Total Scholarships</div>
-            <div className="stat-value" style={{ color: '#f59e0b' }}>৳{totalScholarship.toLocaleString()}</div>
+            <div className="stat-value" style={{ color: 'var(--warning)' }}>৳{totalScholarship.toLocaleString()}</div>
           </div>
         </div>
       </div>

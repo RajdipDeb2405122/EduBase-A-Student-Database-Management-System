@@ -280,10 +280,12 @@ async function updateAccount(db, role, key, input, actorId) {
     role === 'faculty' &&
     body.department_id !== old.department_id
   ) {
-    const used = await db.query(
-      'SELECT 1 FROM course WHERE faculty_id=$1 LIMIT 1',
-      [key]
-    );
+    const used = await db.query(`
+      SELECT 1 FROM course WHERE faculty_id=$1
+      UNION ALL
+      SELECT 1 FROM course_teacher WHERE faculty_id=$1
+      LIMIT 1
+    `, [key]);
 
     check(
       !used.rowCount,

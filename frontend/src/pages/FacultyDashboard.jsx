@@ -254,12 +254,12 @@ export default function FacultyDashboard() {
     )
   }
 
-  const mine = data.courses.filter(course =>
-    course.faculty_id === data.profile.faculty_id
+  const mine = data.courses.filter(
+    course => course.is_mine
   )
 
-  const available = data.courses.filter(course =>
-    course.faculty_id === null
+  const available = data.courses.filter(
+    course => !course.is_mine
   )
 
   const upcoming = data.exams
@@ -483,6 +483,12 @@ export default function FacultyDashboard() {
           <div className="card">
             <h2>Available courses in my department</h2>
 
+            <p>
+              You can add any active course in your
+              department, even if another teacher already
+              teaches it.
+            </p>
+
             <div className="table-container">
               <table>
                 <thead>
@@ -524,7 +530,7 @@ export default function FacultyDashboard() {
             </div>
 
             {!available.length && (
-              <p>No unassigned courses are available.</p>
+              <p>No other courses are available in your department.</p>
             )}
           </div>
         </>

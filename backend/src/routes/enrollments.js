@@ -1,162 +1,261 @@
-const express = require('express');
+const router = require('express').Router();
 const pool = require('../config/database');
 const auth = require('../middleware/auth');
 
-const router = express.Router();
+const {
+  wrap,
+  check,
+  id,
+  text,
+  transaction,
+  log
+} = require('../lib/common');
 
-// Get all enrollments
-router.get('/', async (req, res) => {
-  try {
-    const { academic_year, term, status, student_id } = req.query;
-    let query = `
-      SELECT e.*, s.registration_no, s.full_name as student_name,
-             c.course_code, c.course_title,
-             a.full_name as authorized_by_name
-      FROM enrollment e
-      JOIN student s ON e.student_id = s.student_id
-      JOIN course c ON e.course_id = c.course_id
-      LEFT JOIN admin_public a ON e.authorized_by_admin_id = a.admin_id
-      WHERE 1=1
-    `;
-    const params = [];
-    let paramIndex = 1;
+const {
+  enrollmentSQL,
+  createPendingEnrollment
+} = require('../lib/courseFees');
 
-    if (academic_year) {
-      query += ` AND e.academic_year = $${paramIndex}`;
-      params.push(academic_year);
-      paramIndex++;
-    }
-    if (term) {
-      query += ` AND e.term = $${paramIndex}`;
-      params.push(term);
-      paramIndex++;
-    }
-    if (status) {
-      query += ` AND e.status = $${paramIndex}`;
-      params.push(status);
-      paramIndex++;
-    }
-    if (student_id) {
-      query += ` AND e.student_id = $${paramIndex}`;
-      params.push(student_id);
-      paramIndex++;
-    }
+router.use(auth, auth.requireAdmin);
 
-    query += ' ORDER BY e.academic_year DESC, e.term, s.registration_no';
+router.get('/', wrap(async (req, res) => {
+  const result = await pool.query(`
+    ${enrollmentSQL}
 
-    const result = await pool.query(query, params);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    WHERE ($1::int IS NULL OR e.student_id=$1)
+      AND ($2::text IS NULL OR e.academic_year=$2)
+      AND ($3::text IS NULL OR e.term=$3)
+      AND ($4::text IS NULL OR e.status=$4)
 
-// Get enrollment by ID
-router.get('/:id', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT e.*, s.registration_no, s.full_name as student_name,
-             c.course_code, c.course_title, c.credit_hours,
-             a.full_name as authorized_by_name
-      FROM enrollment e
-      JOIN student s ON e.student_id = s.student_id
-      JOIN course c ON e.course_id = c.course_id
-      LEFT JOIN admin_public a ON e.authorized_by_admin_id = a.admin_id
-      WHERE e.enrollment_id = $1
-    `, [req.params.id]);
+    ORDER BY
+      e.academic_year DESC,
+      e.term,
+      s.registration_no
+  `, [
+    id(req.query.student_id, 'student', true),
+    text(req.query.academic_year, 'academic year', 20, false),
+    text(req.query.term, 'term', 20, false),
+    text(req.query.status, 'status', 20, false)
+  ]);
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Enrollment not found' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  res.json(result.rows);
+}));
 
-// Create enrollment
-router.post('/', auth, async (req, res) => {
-  try {
-    const { student_id, course_id, academic_year, term, enrolled_on } = req.body;
+router.get('/:id', wrap(async (req, res) => {
+  const result = await pool.query(`
+    ${enrollmentSQL}
+    WHERE e.enrollment_id=$1
+  `, [id(req.params.id)]);
 
-    // Check for duplicate
-    const existing = await pool.query(
-      'SELECT * FROM enrollment WHERE student_id = $1 AND course_id = $2 AND academic_year = $3 AND term = $4',
-      [student_id, course_id, academic_year, term]
+  check(
+    result.rowCount,
+    'Enrollment not found',
+    404
+  );
+
+  res.json(result.rows[0]);
+}));
+
+router.post('/', wrap(async (req, res) => {
+  const allowed = [
+    'student_id',
+    'course_id',
+    'academic_year',
+    'term',
+    'enrolled_on'
+  ];
+
+  check(
+    Object.keys(req.body).every(
+      key => allowed.includes(key)
+    ),
+    'Do not supply status or payment fields'
+  );
+
+  const result = await transaction(async db => {
+    const enrollment = await createPendingEnrollment(
+      db,
+      req.body,
+      req.admin.admin_id
     );
 
-    if (existing.rows.length > 0) {
-      return res.status(400).json({ error: 'Student already enrolled in this course for this term' });
-    }
-
-    const result = await pool.query(
-      `INSERT INTO enrollment (student_id, course_id, authorized_by_admin_id, 
-        academic_year, term, enrolled_on, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'enrolled') RETURNING *`,
-      [student_id, course_id, req.admin.admin_id, academic_year, term, enrolled_on || new Date()]
+    await log(
+      db,
+      req.admin.admin_id,
+      'enrollment',
+      enrollment.enrollment_id,
+      'AUTHORIZE',
+      'Course authorized; awaiting student course-fee payment'
     );
 
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'enrollment', $2, 'AUTHORIZE', $3)`,
-      [req.admin.admin_id, result.rows[0].enrollment_id, 
-       `Authorized enrollment for student ${student_id} in course ${course_id}`]
+    const record = await db.query(`
+      ${enrollmentSQL}
+      WHERE e.enrollment_id=$1
+    `, [enrollment.enrollment_id]);
+
+    return record.rows[0];
+  });
+
+  res.status(201).json(result);
+}));
+
+router.put('/:id', wrap(async (req, res) => {
+  check(
+    Object.keys(req.body).length === 1 &&
+      Object.hasOwn(req.body, 'status'),
+    'Only enrollment status can be updated'
+  );
+
+  check(
+    [
+      'pending_payment',
+      'enrolled',
+      'completed',
+      'dropped'
+    ].includes(req.body.status),
+    'Invalid enrollment status'
+  );
+
+  const result = await transaction(async db => {
+    const found = await db.query(`
+      ${enrollmentSQL}
+      WHERE e.enrollment_id=$1
+      FOR UPDATE OF e
+    `, [id(req.params.id)]);
+
+    check(
+      found.rowCount,
+      'Enrollment not found',
+      404
     );
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    const old = found.rows[0];
 
-// Update enrollment status
-router.put('/:id', auth, async (req, res) => {
-  try {
-    const { status } = req.body;
-
-    const result = await pool.query(
-      'UPDATE enrollment SET status = $1 WHERE enrollment_id = $2 RETURNING *',
-      [status, req.params.id]
+    check(
+      !(
+        old.fee_required &&
+        old.payment_status !== 'paid' &&
+        ['enrolled', 'completed'].includes(req.body.status)
+      ),
+      'The student must pay the course fee before enrollment can be completed',
+      409
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Enrollment not found' });
-    }
-
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'enrollment', $2, 'UPDATE', $3)`,
-      [req.admin.admin_id, req.params.id, `Enrollment status changed to: ${status}`]
+    check(
+      !(
+        old.payment_status === 'paid' &&
+        req.body.status === 'pending_payment'
+      ),
+      'A paid course cannot be charged again',
+      409
     );
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Delete enrollment
-router.delete('/:id', auth, async (req, res) => {
-  try {
-    const result = await pool.query(
-      'DELETE FROM enrollment WHERE enrollment_id = $1 RETURNING *',
-      [req.params.id]
+    check(
+      old.fee_required ||
+        req.body.status !== 'pending_payment',
+      'Historical enrollments are not subject to this new course fee',
+      409
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Enrollment not found' });
-    }
-
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, old_value)
-       VALUES ($1, 'enrollment', $2, 'DELETE', $3)`,
-      [req.admin.admin_id, req.params.id, 'Enrollment removed']
+    await db.query(
+      'UPDATE enrollment SET status=$1 WHERE enrollment_id=$2',
+      [req.body.status, old.enrollment_id]
     );
 
-    res.json({ message: 'Enrollment deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    await log(
+      db,
+      req.admin.admin_id,
+      'enrollment',
+      old.enrollment_id,
+      'UPDATE',
+      `Status changed to ${req.body.status}`
+    );
+
+    const updated = await db.query(`
+      ${enrollmentSQL}
+      WHERE e.enrollment_id=$1
+    `, [old.enrollment_id]);
+
+    return updated.rows[0];
+  });
+
+  res.json(result);
+}));
+
+router.delete('/:id', wrap(async (req, res) => {
+  await transaction(async db => {
+    const found = await db.query(`
+      SELECT *
+      FROM enrollment
+      WHERE enrollment_id=$1
+      FOR UPDATE
+    `, [id(req.params.id)]);
+
+    check(
+      found.rowCount,
+      'Enrollment not found',
+      404
+    );
+
+    const old = found.rows[0];
+
+    const used = await db.query(`
+      SELECT 1
+      FROM course_payment
+      WHERE enrollment_id=$1
+
+      UNION ALL
+
+      SELECT 1
+      FROM exam_result
+      WHERE enrollment_id=$1
+    `, [old.enrollment_id]);
+
+    check(
+      !used.rowCount,
+      'Enrollments with payments or exam results cannot be deleted. Use an appropriate status instead.',
+      409
+    );
+
+    const approved = await db.query(`
+      SELECT 1
+      FROM course_registration_requests
+      WHERE student_id=$1
+        AND course_id=$2
+        AND academic_year=$3
+        AND term=$4
+        AND status='approved'
+    `, [
+      old.student_id,
+      old.course_id,
+      old.academic_year,
+      old.term
+    ]);
+
+    check(
+      !approved.rowCount,
+      'An approved course request must be retained. Set the enrollment to dropped instead.',
+      409
+    );
+
+    await db.query(
+      'DELETE FROM enrollment WHERE enrollment_id=$1',
+      [old.enrollment_id]
+    );
+
+    await log(
+      db,
+      req.admin.admin_id,
+      'enrollment',
+      old.enrollment_id,
+      'DELETE',
+      'Deleted unused enrollment authorization'
+    );
+  });
+
+  res.json({
+    message: 'Enrollment deleted'
+  });
+}));
 
 module.exports = router;

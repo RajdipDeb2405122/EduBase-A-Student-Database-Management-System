@@ -34,6 +34,8 @@ app.use(
   require('./routes/studentAuth')
 );
 
+app.use('/api/student-payments', require('./routes/studentPayments'));
+
 app.use(
   '/api/faculty-auth',
   require('./routes/facultyAuth')

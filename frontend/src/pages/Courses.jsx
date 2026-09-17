@@ -1,6 +1,17 @@
 import { useState, useEffect } from 'react'
 import api from '../api'
 
+const emptyForm = {
+  course_code: '',
+  course_title: '',
+  program_id: '',
+  faculty_id: '',
+  credit_hours: '3.00',
+  term_no: 1,
+  course_type: 'Core',
+  active: true
+}
+
 const Courses = () => {
   const [courses, setCourses] = useState([])
   const [programs, setPrograms] = useState([])
@@ -8,16 +19,8 @@ const Courses = () => {
   const [loading, setLoading] = useState(true)
   const [filterProgram, setFilterProgram] = useState('')
   const [showModal, setShowModal] = useState(false)
-  const [formData, setFormData] = useState({
-    course_code: '',
-    course_title: '',
-    program_id: '',
-    faculty_id: '',
-    credit_hours: '3.00',
-    term_no: 1,
-    course_type: 'Core',
-    active: true
-  })
+  const [editingCourseId, setEditingCourseId] = useState(null)
+  const [formData, setFormData] = useState(emptyForm)
 
   useEffect(() => {
     loadData()
@@ -40,21 +43,63 @@ const Courses = () => {
     }
   }
 
+  const openAddModal = () => {
+    setEditingCourseId(null)
+    setFormData(emptyForm)
+    setShowModal(true)
+  }
+
+  const openEditModal = (course) => {
+    setEditingCourseId(course.course_id)
+    setFormData({
+      course_code: course.course_code || '',
+      course_title: course.course_title || '',
+      program_id: course.program_id ?? '',
+      faculty_id: course.faculty_id ?? '',
+      credit_hours: course.credit_hours ?? '3.00',
+      term_no: course.term_no ?? 1,
+      course_type: course.course_type || 'Core',
+      active: course.active !== false
+    })
+    setShowModal(true)
+  }
+
+  const closeModal = () => {
+    setShowModal(false)
+    setEditingCourseId(null)
+    setFormData(emptyForm)
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      await api.post('/courses', formData)
-      setShowModal(false)
-      setFormData({
-        course_code: '',
-        course_title: '',
-        program_id: '',
-        faculty_id: '',
-        credit_hours: '3.00',
-        term_no: 1,
-        course_type: 'Core',
-        active: true
-      })
+      const payload = {
+        ...formData,
+        program_id: formData.program_id ? parseInt(formData.program_id) : null,
+        faculty_id: formData.faculty_id ? parseInt(formData.faculty_id) : null,
+        credit_hours: parseFloat(formData.credit_hours),
+        term_no: parseInt(formData.term_no)
+      }
+
+      if (editingCourseId) {
+        await api.put(`/courses/${editingCourseId}`, payload)
+      } else {
+        await api.post('/courses', payload)
+      }
+
+      closeModal()
+      loadData()
+    } catch (err) {
+      alert(err.message)
+    }
+  }
+
+  const handleDelete = async (course) => {
+    if (!window.confirm(`Delete course ${course.course_code} - ${course.course_title}? This cannot be undone.`)) {
+      return
+    }
+    try {
+      await api.delete(`/courses/${course.course_id}`)
       loadData()
     } catch (err) {
       alert(err.message)
@@ -71,7 +116,7 @@ const Courses = () => {
     <div>
       <div className="page-header">
         <h1 className="page-title">Courses</h1>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ Add Course</button>
+        <button className="btn btn-primary" onClick={openAddModal}>+ Add Course</button>
       </div>
 
       <div className="card">
@@ -96,6 +141,7 @@ const Courses = () => {
                 <th>Term</th>
                 <th>Type</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -113,19 +159,26 @@ const Courses = () => {
                       {course.active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => openEditModal(course)}>Edit</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(course)}>Delete</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        {filteredCourses.length === 0 && <div className="empty-state">No courses found</div>}
       </div>
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Add New Course</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>&times;</button>
+              <h2 className="modal-title">{editingCourseId ? 'Edit Course' : 'Add New Course'}</h2>
+              <button className="modal-close" onClick={closeModal}>&times;</button>
             </div>
 
             <form onSubmit={handleSubmit}>
@@ -188,9 +241,20 @@ const Courses = () => {
                 </div>
               </div>
 
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Status</label>
+                  <select className="form-select" value={formData.active ? 'true' : 'false'}
+                    onChange={(e) => setFormData({...formData, active: e.target.value === 'true'})}>
+                    <option value="true">Active</option>
+                    <option value="false">Inactive</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Add Course</button>
+                <button type="button" className="btn btn-secondary" onClick={closeModal}>Cancel</button>
+                <button type="submit" className="btn btn-primary">{editingCourseId ? 'Save Changes' : 'Add Course'}</button>
               </div>
             </form>
           </div>

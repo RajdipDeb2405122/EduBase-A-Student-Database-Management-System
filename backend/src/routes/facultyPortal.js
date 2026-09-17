@@ -13,7 +13,7 @@ router.use(auth, auth.requireFaculty);
 
 async function ownedExam(db, req, write = false) {
   const r = await db.query(`
-    SELECT x.*,c.faculty_id=$2 AND c.active AS can_edit
+    SELECT x.*,faculty_teaches(c.course_id,$2) AND c.active AS can_edit
     FROM exam x
     JOIN course c ON c.course_id=x.course_id
     WHERE x.exam_id=$1 AND x.faculty_id=$2
@@ -41,15 +41,19 @@ router.get('/dashboard', wrap(async (req, res) => {
     profile(pool, 'faculty', facultyId),
 
     pool.query(`
-      SELECT c.*,p.program_name
+      SELECT
+        c.*,
+        p.program_name,
+        faculty_teaches(c.course_id,$1) AS is_mine,
+        (
+          SELECT count(*)::int
+          FROM course_teacher ct
+          WHERE ct.course_id=c.course_id
+        ) AS teacher_count
       FROM course c
       JOIN program p ON p.program_id=c.program_id
-      WHERE c.faculty_id=$1
-        OR (
-          c.faculty_id IS NULL
-          AND c.active=TRUE
-          AND p.department_id=$2
-        )
+      WHERE faculty_teaches(c.course_id,$1)
+        OR (c.active=TRUE AND p.department_id=$2)
       ORDER BY c.course_code
     `, [facultyId, req.user.department_id]),
 
@@ -67,7 +71,7 @@ router.get('/dashboard', wrap(async (req, res) => {
           FROM enrollment e
           JOIN course c ON c.course_id=e.course_id
           WHERE e.student_id=s.student_id
-            AND c.faculty_id=$1
+            AND faculty_teaches(c.course_id,$1)
             AND e.status IN ('enrolled','completed')
         )
       ORDER BY s.registration_no
@@ -76,7 +80,7 @@ router.get('/dashboard', wrap(async (req, res) => {
     pool.query(`
       SELECT
         x.*,c.course_code,c.course_title,
-        c.faculty_id=$1 AND c.active AS can_edit,
+        faculty_teaches(c.course_id,$1) AND c.active AS can_edit,
         (
           SELECT count(*)::int
           FROM exam_result r
@@ -129,26 +133,36 @@ router.put('/profile', wrap(async (req, res) => {
   );
 }));
 
+// Any teacher may add any active course of their own department,
+// even when other teachers already teach it.
 router.post('/courses/:id', wrap(async (req, res) => {
-  const r = await pool.query(`
-    UPDATE course c
-    SET faculty_id=$2
-    FROM program p
-    WHERE c.program_id=p.program_id
-      AND c.course_id=$1
+  const courseId = id(req.params.id);
+
+  const allowed = await pool.query(`
+    SELECT 1
+    FROM course c
+    JOIN program p ON p.program_id=c.program_id
+    WHERE c.course_id=$1
       AND c.active=TRUE
-      AND p.department_id=$3
-      AND (c.faculty_id IS NULL OR c.faculty_id=$2)
-    RETURNING c.course_id
-  `, [
-    id(req.params.id),
-    req.user.faculty_id,
-    req.user.department_id
-  ]);
+      AND p.department_id=$2
+  `, [courseId, req.user.department_id]);
+
+  check(
+    allowed.rowCount,
+    'Course is inactive or outside your department',
+    409
+  );
+
+  const r = await pool.query(`
+    INSERT INTO course_teacher (course_id,faculty_id)
+    VALUES ($1,$2)
+    ON CONFLICT (course_id,faculty_id) DO NOTHING
+    RETURNING course_id
+  `, [courseId, req.user.faculty_id]);
 
   check(
     r.rowCount,
-    'Course is unavailable, already assigned, or outside your department',
+    'This course is already in your teaching list',
     409
   );
 
@@ -156,17 +170,29 @@ router.post('/courses/:id', wrap(async (req, res) => {
 }));
 
 router.delete('/courses/:id', wrap(async (req, res) => {
+  const courseId = id(req.params.id);
+  const facultyId = req.user.faculty_id;
+
   const r = await pool.query(`
-    UPDATE course SET faculty_id=NULL
+    DELETE FROM course_teacher
     WHERE course_id=$1 AND faculty_id=$2
     RETURNING course_id
-  `, [id(req.params.id), req.user.faculty_id]);
+  `, [courseId, facultyId]);
 
-  check(
-    r.rowCount,
-    'You are not assigned to this course',
-    403
-  );
+  if (!r.rowCount) {
+    // Legacy assignment recorded only on course.faculty_id.
+    const legacy = await pool.query(`
+      UPDATE course SET faculty_id=NULL
+      WHERE course_id=$1 AND faculty_id=$2
+      RETURNING course_id
+    `, [courseId, facultyId]);
+
+    check(
+      legacy.rowCount,
+      'You are not assigned to this course',
+      403
+    );
+  }
 
   res.json({
     message: 'Teaching assignment removed. Academic records were kept.'
@@ -190,7 +216,7 @@ router.get('/students/:id/progress', wrap(async (req, res) => {
           FROM enrollment e
           JOIN course c ON c.course_id=e.course_id
           WHERE e.student_id=$1
-            AND c.faculty_id=$2
+            AND faculty_teaches(c.course_id,$2)
             AND e.status IN ('enrolled','completed')
         )
       )
@@ -210,7 +236,7 @@ router.get('/students/:id/progress', wrap(async (req, res) => {
       FROM enrollment e
       JOIN course c ON c.course_id=e.course_id
       WHERE e.student_id=$1
-        AND ($3::boolean OR c.faculty_id=$2)
+        AND ($3::boolean OR faculty_teaches(c.course_id,$2))
       ORDER BY e.academic_year DESC,e.term
     `, [studentId, facultyId, advisor]),
 
@@ -224,7 +250,7 @@ router.get('/students/:id/progress', wrap(async (req, res) => {
       JOIN exam x ON x.exam_id=r.exam_id
       JOIN course c ON c.course_id=x.course_id
       WHERE r.student_id=$1
-        AND ($3::boolean OR c.faculty_id=$2)
+        AND ($3::boolean OR faculty_teaches(c.course_id,$2))
         AND (x.published=TRUE OR x.faculty_id=$2)
       ORDER BY x.exam_date DESC NULLS LAST
     `, [studentId, facultyId, advisor])
@@ -244,7 +270,7 @@ router.post('/exams', wrap(async (req, res) => {
     const c = await db.query(`
       SELECT * FROM course
       WHERE course_id=$1
-        AND faculty_id=$2
+        AND faculty_teaches(course_id,$2)
         AND active=TRUE
       FOR SHARE
     `, [

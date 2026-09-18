@@ -5,14 +5,26 @@ const cors = require('cors');
 const auth = require('./middleware/auth');
 const { errors } = require('./lib/common');
 const live = require('./lib/live');
+const { securityHeaders, guardLogins } = require('./middleware/security');
 
 const app = express();
+
+// Express reports the real client address behind a proxy, which the
+// login rate limiter needs to tell users apart.
+app.set('trust proxy', 1);
+
+// Standard hardening headers on every response.
+app.use(securityHeaders);
 
 app.use(cors());
 
 // Ordinary JSON requests remain small.
 // Profile-photo uploads use their own bounded raw-body parser.
 app.use(express.json({ limit: '64kb' }));
+
+// Throttle repeated password attempts on every /login endpoint.
+// Runs after express.json so the email in the body is available.
+app.use(guardLogins);
 
 app.use(live.notifyChanges);
 

@@ -1,3 +1,5 @@
+const pool = require('../config/database');
+
 const {
   check, id, text, date, number, grade
 } = require('./common');
@@ -188,9 +190,160 @@ async function legacyDefinition(db, enrollmentId, body) {
   return x.rows[0];
 }
 
+// Result-publication requests live in their own table so the
+// shared base schema and migration list do not have to change.
+// One request covers an ENTIRE exam: after the admin accepts,
+// every student's result for that exam is published together.
+// Created lazily on first use; the CREATE promise is memoised,
+// while the idempotent upgrade DO-block re-runs on every call so
+// an older per-student table is always converted when found.
+let publishTable = null;
+
+function ensureExamPublishTables() {
+  if (!publishTable) {
+    publishTable = pool.query(`
+      CREATE TABLE IF NOT EXISTS exam_publish_requests (
+        request_id SERIAL PRIMARY KEY,
+
+        exam_id INT NOT NULL
+          REFERENCES exam(exam_id)
+          ON DELETE CASCADE,
+
+        faculty_id INT NOT NULL
+          REFERENCES faculty(faculty_id)
+          ON DELETE CASCADE,
+
+        status VARCHAR(20) NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'approved', 'rejected')),
+
+        requested_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+        reviewed_by_admin_id INT
+          REFERENCES admin(admin_id)
+          ON DELETE SET NULL,
+
+        reviewed_on TIMESTAMP
+      )
+    `).catch(error => {
+      // Allow a retry after a transient database failure.
+      publishTable = null;
+      throw error;
+    });
+  }
+
+  return publishTable
+    // Upgrade an older per-student table (if present) to the
+    // exam-level design: previously approved requests keep
+    // their effect by marking the exam published first, then
+    // names/shape are aligned (idempotent; safe on the
+    // fresh-install path too).
+    .then(() => pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_name='exam_publish_requests'
+            AND column_name='student_id'
+        ) THEN
+          UPDATE exam x
+          SET published=TRUE
+          WHERE EXISTS (
+            SELECT 1
+            FROM exam_publish_requests q
+            WHERE q.exam_id=x.exam_id
+              AND q.status='approved'
+          );
+
+          UPDATE exam_result r
+          SET obtained_marks=0,
+              grade='F',
+              updated_at=CURRENT_TIMESTAMP
+          WHERE r.obtained_marks IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM exam_publish_requests q
+              WHERE q.exam_id=r.exam_id
+                AND q.status='approved'
+            );
+
+          DELETE FROM exam_publish_requests;
+        END IF;
+
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='exam_publish_requests'
+            AND column_name='created_at'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='exam_publish_requests'
+            AND column_name='requested_on'
+        ) THEN
+          ALTER TABLE exam_publish_requests
+            RENAME COLUMN created_at TO requested_on;
+        END IF;
+
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='exam_publish_requests'
+            AND column_name='reviewed_at'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='exam_publish_requests'
+            AND column_name='reviewed_on'
+        ) THEN
+          ALTER TABLE exam_publish_requests
+            RENAME COLUMN reviewed_at TO reviewed_on;
+        END IF;
+
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='exam_publish_requests'
+            AND column_name='admin_id'
+        ) AND NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='exam_publish_requests'
+            AND column_name='reviewed_by_admin_id'
+        ) THEN
+          ALTER TABLE exam_publish_requests
+            RENAME COLUMN admin_id TO reviewed_by_admin_id;
+        END IF;
+
+        ALTER TABLE exam_publish_requests
+          DROP COLUMN IF EXISTS student_id;
+        ALTER TABLE exam_publish_requests
+          DROP COLUMN IF EXISTS academic_year;
+        ALTER TABLE exam_publish_requests
+          DROP COLUMN IF EXISTS term;
+        ALTER TABLE exam_publish_requests
+          DROP COLUMN IF EXISTS admin_remark;
+
+        DROP INDEX IF EXISTS exam_publish_request_pending;
+      END $$
+    `))
+    .then(() => pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS
+        exam_publish_request_pending
+      ON exam_publish_requests (exam_id)
+      WHERE status='pending'
+    `))
+    .then(() => pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS
+        exam_publish_request_approved
+      ON exam_publish_requests (exam_id)
+      WHERE status='approved'
+    `))
+    .catch(error => {
+      // Allow a retry after a transient database failure.
+      publishTable = null;
+      throw error;
+    });
+}
+
 module.exports = {
   resultsSQL,
   definition,
   saveResult,
-  legacyDefinition
+  legacyDefinition,
+  ensureExamPublishTables
 };

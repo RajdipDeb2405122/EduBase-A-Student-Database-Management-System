@@ -16,6 +16,12 @@ const {
   listPayments
 } = require('../lib/courseFees');
 
+const {
+  PREDEFINED_SCHOLARSHIPS,
+  ensureScholarshipTables,
+  predefinedScholarship
+} = require('../lib/scholarships');
+
 router.post('/register', register('student'));
 router.post('/login', wrap(login('student')));
 
@@ -168,6 +174,77 @@ for (const [name, sql] of Object.entries(queries)) {
   );
 }
 
+// The 10 fixed scholarships a student may choose from.
+// Names and amounts come from the server and cannot be edited.
+router.get('/me/:id/scholarship-options', (req, res) => {
+  res.json(PREDEFINED_SCHOLARSHIPS);
+});
+
+// Applications submitted by this student.
+router.get(
+  '/me/:id/scholarship-applications',
+  wrap(async (req, res) => {
+    await ensureScholarshipTables();
+
+    const result = await pool.query(`
+      SELECT *
+      FROM scholarship_application
+      WHERE student_id=$1
+      ORDER BY applied_on DESC
+    `, [req.user.student_id]);
+
+    res.json(result.rows);
+  })
+);
+
+// Submit an application. Only the scholarship_name is accepted;
+// the amount and type always come from the predefined list.
+router.post(
+  '/me/:id/scholarship-applications',
+  wrap(async (req, res) => {
+    await ensureScholarshipTables();
+
+    const offer = predefinedScholarship(
+      req.body.scholarship_name
+    );
+
+    check(offer, 'Select one of the available scholarships', 400);
+
+    const existing = await pool.query(`
+      SELECT status
+      FROM scholarship_application
+      WHERE student_id=$1
+        AND scholarship_name=$2
+        AND status IN ('pending', 'approved')
+    `, [req.user.student_id, offer.scholarship_name]);
+
+    check(
+      !existing.rowCount,
+
+      existing.rows[0]?.status === 'approved'
+        ? 'You have already been awarded this scholarship'
+        : 'Your application for this scholarship is awaiting admin review',
+
+      409
+    );
+
+    const result = await pool.query(`
+      INSERT INTO scholarship_application (
+        student_id, scholarship_name, award_type, amount
+      )
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [
+      req.user.student_id,
+      offer.scholarship_name,
+      offer.award_type,
+      offer.amount
+    ]);
+
+    res.status(201).json(result.rows[0]);
+  })
+);
+
 router.get('/courses/:studentId', wrap(async (req, res) => {
   const level = req.query.level
     ? id(req.query.level, 'level')
@@ -184,7 +261,7 @@ router.get('/courses/:studentId', wrap(async (req, res) => {
 
   check(
     !term || term <= 2,
-    'Term must be 1 or 2'
+    'Term must be between 1 and 2'
   );
 
   const result = await pool.query(`

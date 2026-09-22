@@ -7,7 +7,9 @@ const {
 } = require('../lib/common');
 
 const { profile } = require('../lib/accounts');
-const { definition, saveResult } = require('../lib/exams');
+const {
+  definition, saveResult, ensureExamPublishTables
+} = require('../lib/exams');
 
 router.use(auth, auth.requireFaculty);
 
@@ -107,6 +109,55 @@ router.get('/dashboard', wrap(async (req, res) => {
   });
 }));
 
+// The faculty member's own exam-level publication requests
+// and the admin's decisions on them (no per-student rows).
+router.get('/publish-requests', wrap(async (req, res) => {
+  await ensureExamPublishTables();
+
+  const result = await pool.query(`
+    SELECT
+      r.request_id,
+      r.exam_id,
+      r.faculty_id,
+      r.status,
+      r.requested_on,
+      r.reviewed_by_admin_id,
+      r.reviewed_on,
+      x.exam_type,
+      x.exam_date,
+      x.academic_year,
+      x.term,
+      x.published,
+      c.course_code,
+      c.course_title,
+      (
+        SELECT count(*)::int
+        FROM exam_result er
+        WHERE er.exam_id=r.exam_id
+          AND er.obtained_marks IS NOT NULL
+      ) AS graded_count,
+      (
+        SELECT count(*)::int
+        FROM exam_result er
+        WHERE er.exam_id=r.exam_id
+      ) AS student_count
+
+    FROM exam_publish_requests r
+
+    JOIN exam x
+      ON x.exam_id=r.exam_id
+
+    JOIN course c
+      ON c.course_id=x.course_id
+
+    WHERE r.faculty_id=$1
+
+    ORDER BY (r.status='pending') DESC, r.requested_on DESC
+  `, [req.user.faculty_id]);
+
+  res.json(result.rows);
+}));
+
 router.put('/profile', wrap(async (req, res) => {
   await transaction(async db => {
     await db.query(
@@ -200,6 +251,8 @@ router.delete('/courses/:id', wrap(async (req, res) => {
 }));
 
 router.get('/students/:id/progress', wrap(async (req, res) => {
+  await ensureExamPublishTables();
+
   const studentId = id(req.params.id);
   const facultyId = req.user.faculty_id;
 
@@ -367,27 +420,53 @@ router.put(
   })
 );
 
-router.put(
-  '/exams/:examId/publication',
+// Faculty cannot publish results directly. One request covers
+// the ENTIRE exam: after the administrator accepts it, every
+// student's result for this exam is published together.
+router.post(
+  '/exams/:examId/publish-requests',
   wrap(async (req, res) => {
-    check(
-      typeof req.body.published === 'boolean',
-      'published must be true or false'
-    );
+    await ensureExamPublishTables();
 
-    await transaction(async db => {
+    const request = await transaction(async db => {
       const x = await ownedExam(db, req, true);
 
-      await db.query(
-        'UPDATE exam SET published=$1 WHERE exam_id=$2',
-        [req.body.published, x.exam_id]
+      check(
+        !x.published,
+        'Results for this exam are already published',
+        409
       );
+
+      const existing = await db.query(`
+        SELECT status
+        FROM exam_publish_requests
+        WHERE exam_id=$1
+          AND status IN ('pending', 'approved')
+      `, [x.exam_id]);
+
+      check(
+        !existing.rowCount,
+
+        existing.rows[0]?.status === 'approved'
+          ? 'This exam has already been approved for publication'
+          : 'A publish request for this exam is already awaiting review',
+
+        409
+      );
+
+      const created = await db.query(`
+        INSERT INTO exam_publish_requests
+          (exam_id, faculty_id)
+        VALUES ($1, $2)
+        RETURNING *
+      `, [x.exam_id, req.user.faculty_id]);
+
+      return created.rows[0];
     });
 
-    res.json({
-      message: req.body.published
-        ? 'Results published'
-        : 'Results hidden from students'
+    res.status(201).json({
+      message: 'Publish request sent to the administrator',
+      request
     });
   })
 );

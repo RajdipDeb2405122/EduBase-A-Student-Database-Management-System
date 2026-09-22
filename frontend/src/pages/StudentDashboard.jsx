@@ -59,6 +59,10 @@ const StudentDashboard = () => {
   const [exams, setExams] = useState([])
   const [payments, setPayments] = useState([])
   const [scholarships, setScholarships] = useState([])
+  const [scholarshipOptions, setScholarshipOptions] = useState([])
+  const [scholarshipApplications, setScholarshipApplications] = useState([])
+  const [selectedScholarship, setSelectedScholarship] = useState('')
+  const [applying, setApplying] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -89,6 +93,8 @@ const StudentDashboard = () => {
         results,
         paid,
         awards,
+        scholarshipOpts,
+        scholarshipApps,
         personal,
         paymentOptions
       ] = await Promise.all([
@@ -98,6 +104,8 @@ const StudentDashboard = () => {
         api.get(`/student-auth/me/${studentId}/exams`),
         api.get(`/student-auth/me/${studentId}/payments`),
         api.get(`/student-auth/me/${studentId}/scholarships`),
+        api.get(`/student-auth/me/${studentId}/scholarship-options`),
+        api.get(`/student-auth/me/${studentId}/scholarship-applications`),
         api.get('/profile/me', { role: 'student' }),
         api.get('/student-payments/config', { role: 'student' })
       ])
@@ -114,6 +122,8 @@ const StudentDashboard = () => {
       setExams(results.data)
       setPayments(paid.data)
       setScholarships(awards.data)
+      setScholarshipOptions(scholarshipOpts.data)
+      setScholarshipApplications(scholarshipApps.data)
       setPaymentConfig(paymentOptions.data)
       setError('')
     } catch (error) {
@@ -207,6 +217,36 @@ const StudentDashboard = () => {
   const openPayment = enrollment => {
     setPaymentError('')
     setSelectedPayment(enrollment)
+  }
+
+  // Apply for one of the 10 predefined scholarships.
+  // Only the scholarship name is sent — name and amount are
+  // fixed on the server and cannot be edited.
+  const handleApplyScholarship = async () => {
+    if (!selectedScholarship || applying) return
+
+    setApplying(true)
+    setMessage('')
+    setError('')
+
+    try {
+      await api.post(
+        `/student-auth/me/${studentId}/scholarship-applications`,
+        { scholarship_name: selectedScholarship }
+      )
+
+      setMessage(
+        'Scholarship application submitted. It will appear below once the admin reviews it.'
+      )
+
+      setSelectedScholarship('')
+
+      await loadProfile()
+    } catch (error) {
+      setError(error.message)
+    } finally {
+      setApplying(false)
+    }
   }
 
   const payCourse = async () => {
@@ -771,7 +811,124 @@ const StudentDashboard = () => {
 
         {activeTab === 'scholarships' && (
           <div>
-            <h2>My Scholarships</h2>
+            <h2>Apply for Scholarship</h2>
+
+            <div className="card" style={{ marginBottom: '1.5rem' }}>
+              <p>
+                Choose one of the 10 available scholarships below.
+                The scholarship name and amount are fixed and
+                cannot be edited. The admin will accept or reject
+                your application.
+              </p>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Scholarship *</label>
+
+                  <select
+                    className="form-select"
+                    value={selectedScholarship}
+                    onChange={event =>
+                      setSelectedScholarship(event.target.value)
+                    }
+                  >
+                    <option value="">Select a scholarship</option>
+
+                    {scholarshipOptions.map(option => (
+                      <option
+                        key={option.scholarship_name}
+                        value={option.scholarship_name}
+                      >
+                        {option.scholarship_name}
+                        {' — '}
+                        ৳{Number(option.amount).toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">&nbsp;</label>
+
+                  <button
+                    className="btn btn-primary"
+                    disabled={applying || !selectedScholarship}
+                    onClick={handleApplyScholarship}
+                  >
+                    {applying ? 'Submitting…' : 'Apply for Scholarship'}
+                  </button>
+                </div>
+              </div>
+
+              {selectedScholarship && (
+                <p>
+                  <strong>Fixed amount:{' '}</strong>
+                  ৳{Number(
+                    scholarshipOptions.find(
+                      option =>
+                        option.scholarship_name === selectedScholarship
+                    )?.amount || 0
+                  ).toLocaleString()}
+                </p>
+              )}
+            </div>
+
+            <h2>My Applications</h2>
+
+            <div className="card" style={{ marginBottom: '1.5rem' }}>
+              {scholarshipApplications.length ? (
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Scholarship</th>
+                        <th>Amount</th>
+                        <th>Applied</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {scholarshipApplications.map(application => (
+                        <tr key={application.application_id}>
+                          <td>{application.scholarship_name}</td>
+
+                          <td>
+                            ৳{Number(
+                              application.amount || 0
+                            ).toLocaleString()}
+                          </td>
+
+                          <td>
+                            {new Date(
+                              application.applied_on
+                            ).toLocaleDateString()}
+                          </td>
+
+                          <td>
+                            <span className={`badge badge-${
+                              application.status === 'approved'
+                                ? 'success'
+                                : application.status === 'rejected'
+                                  ? 'danger'
+                                  : 'warning'
+                            }`}>
+                              {application.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty-state">
+                  No applications submitted yet
+                </p>
+              )}
+            </div>
+
+            <h2>Awarded Scholarships</h2>
 
             <div className="card">
               {scholarships.length ? (

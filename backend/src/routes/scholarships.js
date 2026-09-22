@@ -2,9 +2,21 @@ const express = require('express');
 const pool = require('../config/database');
 const auth = require('../middleware/auth');
 
+const {
+  wrap,
+  check,
+  id,
+  transaction,
+  log
+} = require('../lib/common');
+
+const {
+  ensureScholarshipTables
+} = require('../lib/scholarships');
+
 const router = express.Router();
 
-// Get all scholarships
+// Get all awarded scholarships
 router.get('/', async (req, res) => {
   try {
     const { student_id, status } = req.query;
@@ -37,6 +49,161 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Student applications awaiting an admin Accept/Reject decision.
+// Registered before GET /:id so "applications" is not parsed as an ID.
+router.get('/applications', wrap(async (req, res) => {
+  await ensureScholarshipTables();
+
+  const status = req.query.status || null;
+
+  check(
+    !status || ['pending', 'approved', 'rejected'].includes(status),
+    'Invalid status'
+  );
+
+  const result = await pool.query(`
+    SELECT
+      a.*,
+      s.registration_no,
+      s.full_name AS student_name,
+      r.full_name AS reviewed_by_name
+
+    FROM scholarship_application a
+
+    JOIN student s
+      ON s.student_id=a.student_id
+
+    LEFT JOIN admin_public r
+      ON r.admin_id=a.reviewed_by_admin_id
+
+    WHERE ($1::text IS NULL OR a.status=$1)
+
+    ORDER BY (a.status='pending') DESC, a.applied_on DESC
+  `, [status]);
+
+  res.json(result.rows);
+}));
+
+// Accept an application: the fixed predefined scholarship
+// is then awarded to the student.
+router.put(
+  '/applications/:id/approve',
+  auth,
+  wrap(async (req, res) => {
+    await ensureScholarshipTables();
+
+    const scholarship = await transaction(async db => {
+      const found = await db.query(`
+        SELECT *
+        FROM scholarship_application
+        WHERE application_id=$1
+          AND status='pending'
+        FOR UPDATE
+      `, [id(req.params.id, 'application')]);
+
+      check(
+        found.rowCount,
+        'Application not found or already reviewed',
+        409
+      );
+
+      const application = found.rows[0];
+
+      await db.query(`
+        UPDATE scholarship_application
+        SET status='approved',
+            reviewed_by_admin_id=$1,
+            reviewed_on=CURRENT_TIMESTAMP
+        WHERE application_id=$2
+      `, [
+        req.admin.admin_id,
+        application.application_id
+      ]);
+
+      const awarded = await db.query(`
+        INSERT INTO scholarship (
+          student_id,
+          scholarship_name,
+          award_type,
+          amount,
+          awarded_on,
+          status
+        )
+        VALUES ($1, $2, $3, $4, CURRENT_DATE, 'active')
+        RETURNING *
+      `, [
+        application.student_id,
+        application.scholarship_name,
+        application.award_type,
+        application.amount
+      ]);
+
+      await log(
+        db,
+        req.admin.admin_id,
+        'scholarship_application',
+        application.application_id,
+        'APPROVE',
+        `Accepted application and awarded: ${application.scholarship_name}`
+      );
+
+      return awarded.rows[0];
+    });
+
+    res.json({
+      message: 'Application accepted. Scholarship awarded to the student.',
+      scholarship
+    });
+  })
+);
+
+// Reject an application.
+router.put(
+  '/applications/:id/reject',
+  auth,
+  wrap(async (req, res) => {
+    await ensureScholarshipTables();
+
+    await transaction(async db => {
+      const found = await db.query(`
+        SELECT *
+        FROM scholarship_application
+        WHERE application_id=$1
+          AND status='pending'
+        FOR UPDATE
+      `, [id(req.params.id, 'application')]);
+
+      check(
+        found.rowCount,
+        'Application not found or already reviewed',
+        409
+      );
+
+      await db.query(`
+        UPDATE scholarship_application
+        SET status='rejected',
+            reviewed_by_admin_id=$1,
+            reviewed_on=CURRENT_TIMESTAMP
+        WHERE application_id=$2
+      `, [
+        req.admin.admin_id,
+        found.rows[0].application_id
+      ]);
+
+      await log(
+        db,
+        req.admin.admin_id,
+        'scholarship_application',
+        found.rows[0].application_id,
+        'REJECT',
+        `Rejected application: ${found.rows[0].scholarship_name}`
+      );
+    });
+
+    res.json({ message: 'Application rejected' });
+  })
+);
+
 // Get scholarship by ID
 router.get('/:id', async (req, res) => {
   try {
@@ -56,28 +223,9 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create scholarship
-router.post('/', auth, async (req, res) => {
-  try {
-    const { student_id, scholarship_name, award_type, amount, awarded_on, valid_until, status } = req.body;
-
-    const result = await pool.query(
-      `INSERT INTO scholarship (student_id, scholarship_name, award_type, amount, awarded_on, valid_until, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [student_id, scholarship_name, award_type, amount, awarded_on, valid_until, status || 'active']
-    );
-
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'scholarship', $2, 'CREATE', $3)`,
-      [req.admin.admin_id, result.rows[0].scholarship_id, `Awarded scholarship: ${scholarship_name}`]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// NOTE: the administrator "Award Scholarship" creation endpoint
+// (POST /) was removed on purpose. Scholarships are only created
+// when the admin accepts a student's application above.
 
 // Update scholarship
 router.put('/:id', auth, async (req, res) => {

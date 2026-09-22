@@ -31,13 +31,18 @@ export default function FacultyDashboard() {
   )
 
   const tab = view.tab
-  const setTab = tab => setView({ tab })
+  const setTab = nextTab => {
+    setMessage('')
+    setView({ tab: nextTab })
+  }
 
   const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [roster, setRoster] = useState(null)
   const [drafts, setDrafts] = useState({})
   const [progress, setProgress] = useState(null)
+  const [publishRequests, setPublishRequests] = useState([])
 
   const year = new Date().getFullYear()
 
@@ -133,9 +138,10 @@ export default function FacultyDashboard() {
   const refresh = useCallback(async () => {
     const version = ++dataVersion.current
 
-    const [dashboard, personal] = await Promise.all([
+    const [dashboard, personal, requests] = await Promise.all([
       api.get('/faculty-portal/dashboard'),
-      api.get('/profile/me', { role: 'faculty' })
+      api.get('/profile/me', { role: 'faculty' }),
+      api.get('/faculty-portal/publish-requests')
     ])
 
     if (version !== dataVersion.current) return
@@ -148,6 +154,7 @@ export default function FacultyDashboard() {
       }
     }
 
+    setPublishRequests(requests.data)
     setData(next)
 
     const selectedExam = rosterId.current
@@ -281,6 +288,87 @@ export default function FacultyDashboard() {
     }))
   }
 
+  const awaitingAdmin = examId =>
+    publishRequests.some(
+      request =>
+        request.exam_id === examId &&
+        request.status === 'pending'
+    )
+
+  // Course info for the exam currently open in the Marks section.
+  const openExamMeta = roster
+    ? data.exams.find(
+        item => item.exam_id === roster.exam.exam_id
+      )
+    : null
+
+  // Save every edited row of the open exam's Marks table.
+  const saveAllMarks = () => {
+    if (!roster?.exam.can_edit) return
+
+    setMessage('')
+
+    act(async () => {
+      let saved = 0
+
+      for (const enrollmentId of [...dirtyRows.current]) {
+        const student = roster.students.find(
+          row => row.enrollment_id === enrollmentId
+        )
+
+        if (
+          !student ||
+          !['enrolled', 'completed'].includes(student.status)
+        ) {
+          continue
+        }
+
+        const row = drafts[enrollmentId] || {}
+
+        await api.put(
+          `/faculty-portal/exams/${roster.exam.exam_id}/results/${enrollmentId}`,
+          {
+            obtained_marks:
+              row.obtained_marks === ''
+                ? null
+                : row.obtained_marks,
+
+            remarks: row.remarks
+          }
+        )
+
+        dirtyRows.current.delete(enrollmentId)
+        saved++
+      }
+
+      setMessage(
+        saved
+          ? `Marks saved for ${saved} student(s).`
+          : 'No unsaved marks to save.'
+      )
+    })
+  }
+
+  // Request publication for the ENTIRE exam. After the admin
+  // accepts, every student's result is published together and
+  // blank marks are recorded as 0.
+  const requestPublish = () => {
+    if (!roster) return
+
+    setMessage('')
+
+    act(async () => {
+      await api.post(
+        `/faculty-portal/exams/${roster.exam.exam_id}/publish-requests`,
+        {}
+      )
+
+      setMessage(
+        'Publish request sent to the administrator. All students’ marks will publish together after approval.'
+      )
+    })
+  }
+
   return (
     <div style={{
       maxWidth: 1250,
@@ -372,6 +460,19 @@ export default function FacultyDashboard() {
         </p>
       )}
 
+      {message && (
+        <p
+          className="badge badge-success"
+          role="status"
+          style={{
+            display: 'block',
+            marginBottom: 16
+          }}
+        >
+          {message}
+        </p>
+      )}
+
       {tab === 'overview' && (
         <>
           <div className="stats-grid">
@@ -380,8 +481,10 @@ export default function FacultyDashboard() {
               ['Students under supervision', data.students.length],
               ['My exams', data.exams.length],
               [
-                'Unpublished exams',
-                data.exams.filter(item => !item.published).length
+                'Pending publish requests',
+                publishRequests.filter(
+                  item => item.status === 'pending'
+                ).length
               ]
             ].map(([label, value]) => (
               <div className="stat-card" key={label}>
@@ -530,7 +633,9 @@ export default function FacultyDashboard() {
             </div>
 
             {!available.length && (
-              <p>No other courses are available in your department.</p>
+              <p>
+                No other courses are available in your department.
+              </p>
             )}
           </div>
         </>
@@ -842,39 +947,26 @@ export default function FacultyDashboard() {
                     <td>{item.graded_count} graded</td>
 
                     <td>
-                      {item.published ? 'Published' : 'Draft'}
+                      {item.published
+                        ? 'Published'
+                        : 'Draft'}
+
+                      {awaitingAdmin(item.exam_id) &&
+                        ' · awaiting admin'}
+
                       {!item.can_edit && ' · Read-only'}
                     </td>
 
                     <td>
                       <button
-                        className="btn btn-sm btn-secondary"
-                        disabled={busy}
-                        onClick={() => act(() =>
-                          loadRoster(item.exam_id)
-                        )}
-                      >
-                        Roster / marks
-                      </button>
-                      {' '}
-
-                      <button
                         className="btn btn-sm btn-primary"
-                        disabled={busy || !item.can_edit}
-                        onClick={() => act(async () => {
-                          await api.put(
-                            `/faculty-portal/exams/${item.exam_id}/publication`,
-                            { published: !item.published }
-                          )
-
-                          if (
-                            roster?.exam.exam_id === item.exam_id
-                          ) {
-                            await loadRoster(item.exam_id)
-                          }
-                        })}
+                        disabled={busy}
+                        onClick={() => {
+                          setMessage('')
+                          act(() => loadRoster(item.exam_id))
+                        }}
                       >
-                        {item.published ? 'Unpublish' : 'Publish'}
+                        Open marks
                       </button>
                       {' '}
 
@@ -915,15 +1007,59 @@ export default function FacultyDashboard() {
 
           {roster && (
             <div className="card table-container">
-              <h2>
-                {roster.exam.exam_type}
-                {' — marks out of '}
-                {roster.exam.total_marks}
-              </h2>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                  marginBottom: 8
+                }}
+              >
+                <div>
+                  <h2 style={{ margin: 0 }}>
+                    Marks — {openExamMeta?.course_code}
+                    {' '}
+                    {roster.exam.exam_type}
+                  </h2>
+
+                  <p style={{ margin: '4px 0 0' }}>
+                    {roster.exam.academic_year}
+                    {' / '}
+                    {roster.exam.term}
+                    {' · out of '}
+                    {roster.exam.total_marks}
+                    {' · '}
+                    {roster.students.length}
+                    {' enrolled student(s)'}
+                  </p>
+                </div>
+
+                <span
+                  className={`badge badge-${
+                    roster.exam.published
+                      ? 'success'
+                      : awaitingAdmin(roster.exam.exam_id)
+                        ? 'warning'
+                        : 'secondary'
+                  }`}
+                >
+                  {roster.exam.published
+                    ? 'Published'
+                    : awaitingAdmin(roster.exam.exam_id)
+                      ? 'Awaiting admin approval'
+                      : 'Draft'}
+                </span>
+              </div>
 
               <p>
-                Blank means not graded. Zero is a real score.
-                Publish when results are ready for students.
+                Enter marks for every enrolled student below, then
+                save (per row or all at once). Blank marks stay
+                ungraded until the exam is published, when they
+                are recorded as 0. Request Publish sends this
+                entire exam to the admin — every student’s result
+                is published together after approval.
               </p>
 
               {!roster.exam.can_edit && (
@@ -933,10 +1069,47 @@ export default function FacultyDashboard() {
                 </p>
               )}
 
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  marginBottom: 12
+                }}
+              >
+                <button
+                  className="btn btn-secondary"
+                  disabled={
+                    busy ||
+                    !roster.exam.can_edit ||
+                    dirtyRows.current.size === 0
+                  }
+                  onClick={saveAllMarks}
+                >
+                  Save all marks
+                </button>
+
+                <button
+                  className="btn btn-primary"
+                  disabled={
+                    busy ||
+                    roster.exam.published ||
+                    awaitingAdmin(roster.exam.exam_id)
+                  }
+                  onClick={requestPublish}
+                >
+                  {roster.exam.published
+                    ? 'Published'
+                    : awaitingAdmin(roster.exam.exam_id)
+                      ? 'Awaiting admin approval'
+                      : 'Request Publish'}
+                </button>
+              </div>
+
               <table>
                 <thead>
                   <tr>
                     <th>Student</th>
+                    <th>Enrollment</th>
                     <th>Marks</th>
                     <th>Remarks</th>
                     <th>Save</th>
@@ -975,6 +1148,20 @@ export default function FacultyDashboard() {
                           {student.registration_no}
                           {' — '}
                           {student.full_name}
+                        </td>
+
+                        <td>
+                          <span className={`badge badge-${
+                            ['enrolled', 'completed'].includes(
+                              student.status
+                            )
+                              ? 'success'
+                              : student.status === 'dropped'
+                                ? 'danger'
+                                : 'secondary'
+                          }`}>
+                            {student.status}
+                          </span>
                         </td>
 
                         <td>
@@ -1052,7 +1239,6 @@ export default function FacultyDashboard() {
 
                               setRoster(old => ({
                                 ...old,
-
                                 students: old.students.map(
                                   person =>
                                     person.enrollment_id ===
@@ -1063,7 +1249,7 @@ export default function FacultyDashboard() {
                               }))
                             })}
                           >
-                            Save marks
+                            Save
                           </button>
 
                           {dirtyRows.current.has(
@@ -1086,6 +1272,74 @@ export default function FacultyDashboard() {
               )}
             </div>
           )}
+
+          <div className="card table-container">
+            <h2>My publish requests</h2>
+
+            <p>
+              One request covers a whole exam. After the admin
+              accepts, every student’s result for that exam is
+              published together.
+            </p>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Exam</th>
+                  <th>Year / term</th>
+                  <th>Requested</th>
+                  <th>Status</th>
+                  <th>Reviewed</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {publishRequests.map(request => (
+                  <tr key={request.request_id}>
+                    <td>
+                      {request.course_code}
+                      {' — '}
+                      {request.exam_type}
+                    </td>
+
+                    <td>
+                      {request.academic_year} / {request.term}
+                    </td>
+
+                    <td>
+                      {new Date(
+                        request.requested_on
+                      ).toLocaleString()}
+                    </td>
+
+                    <td>
+                      <span className={`badge badge-${
+                        request.status === 'approved'
+                          ? 'success'
+                          : request.status === 'rejected'
+                            ? 'danger'
+                            : 'warning'
+                      }`}>
+                        {request.status}
+                      </span>
+                    </td>
+
+                    <td>
+                      {request.reviewed_on
+                        ? new Date(
+                            request.reviewed_on
+                          ).toLocaleString()
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {!publishRequests.length && (
+              <p>No publish requests yet.</p>
+            )}
+          </div>
         </>
       )}
 

@@ -1,54 +1,72 @@
 import { useState, useEffect } from 'react'
 import api from '../api'
+import useLiveUpdates from '../hooks/useLiveUpdates'
 
 const Exams = () => {
   const [exams, setExams] = useState([])
-  const [enrollments, setEnrollments] = useState([])
+  const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
-  const [formData, setFormData] = useState({
-    enrollment_id: '',
-    exam_type: 'Midterm',
-    exam_date: '',
-    total_marks: '100',
-    obtained_marks: '',
-    remarks: ''
-  })
-
-  useEffect(() => {
-    loadData()
-  }, [])
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
 
   const loadData = async () => {
     try {
-      const [examsRes, enrollRes] = await Promise.all([
+      const [examsRes, requestsRes] = await Promise.all([
         api.get('/exams'),
-        api.get('/enrollments?status=enrolled')
+        api.get('/exams/publish-requests')
       ])
+
       setExams(examsRes.data)
-      setEnrollments(enrollRes.data)
+      setRequests(requestsRes.data)
+      setError('')
     } catch (err) {
       console.error('Failed to load exams:', err)
+      setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  useLiveUpdates(loadData)
+
+  // The admin can only Accept or Reject a faculty publish
+  // request — never record or publish results directly.
+  const review = async (request, action) => {
+    setBusy(request.request_id)
+    setError('')
+    setMessage('')
+
     try {
-      await api.post('/exams', {
-        ...formData,
-        total_marks: parseFloat(formData.total_marks),
-        obtained_marks: formData.obtained_marks ? parseFloat(formData.obtained_marks) : null
-      })
-      setShowModal(false)
-      setFormData({ enrollment_id: '', exam_type: 'Midterm', exam_date: '', total_marks: '100', obtained_marks: '', remarks: '' })
-      loadData()
+      const { data } = await api.put(
+        `/exams/publish-requests/${request.request_id}/${action}`
+      )
+
+      setMessage(
+        data?.message ||
+        (action === 'approve'
+          ? "Accepted — every student's result for this exam is now published. Blank marks were recorded as 0."
+          : 'Publication request rejected.')
+      )
+
+      await loadData()
     } catch (err) {
-      alert(err.message)
+      setError(err.message)
+    } finally {
+      setBusy(null)
     }
   }
+
+  const statusTone = status =>
+    status === 'approved'
+      ? 'success'
+      : status === 'rejected'
+        ? 'danger'
+        : 'warning'
 
   if (loading) return <div className="spinner"></div>
 
@@ -56,10 +74,125 @@ const Exams = () => {
     <div>
       <div className="page-header">
         <h1 className="page-title">Exams</h1>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ Record Exam</button>
+      </div>
+
+      {error && (
+        <p className="badge badge-danger" role="alert">
+          {error}
+        </p>
+      )}
+
+      {message && (
+        <p className="badge badge-success" role="status">
+          {message}
+        </p>
+      )}
+
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <h2>Result Publication Requests</h2>
+
+        <p>
+          Faculty cannot publish results directly. Each request
+          covers a whole exam — accept to publish every student's
+          result together (blank marks become 0), or reject it.
+        </p>
+
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Course</th>
+                <th>Exam</th>
+                <th>Year / term</th>
+                <th>Requested by</th>
+                <th>Graded</th>
+                <th>Requested</th>
+                <th>Status</th>
+                <th>Review</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {requests.map(request => (
+                <tr key={request.request_id}>
+                  <td>
+                    {request.course_code}
+                    <br />
+                    <small>{request.course_title}</small>
+                  </td>
+
+                  <td>
+                    {request.exam_type}
+                    <br />
+                    <small>
+                      {request.exam_date
+                        ? new Date(request.exam_date).toLocaleDateString()
+                        : 'No date'}
+                    </small>
+                  </td>
+
+                  <td>
+                    {request.academic_year} / {request.term}
+                  </td>
+
+                  <td>{request.faculty_name}</td>
+
+                  <td>
+                    {request.graded_count}/{request.student_count}
+                  </td>
+
+                  <td>
+                    {new Date(request.requested_on).toLocaleDateString()}
+                  </td>
+
+                  <td>
+                    <span className={`badge badge-${statusTone(request.status)}`}>
+                      {request.status}
+                    </span>
+                  </td>
+
+                  <td>
+                    {request.status === 'pending' ? (
+                      <>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          disabled={busy !== null}
+                          onClick={() => review(request, 'approve')}
+                        >
+                          Accept
+                        </button>
+                        {' '}
+
+                        <button
+                          className="btn btn-sm btn-danger"
+                          disabled={busy !== null}
+                          onClick={() => review(request, 'reject')}
+                        >
+                          Reject
+                        </button>
+                      </>
+                    ) : (
+                      <small>
+                        {request.reviewed_by_name
+                          ? `Reviewed by ${request.reviewed_by_name}`
+                          : request.status}
+                      </small>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {!requests.length && (
+          <div className="empty-state">No publication requests</div>
+        )}
       </div>
 
       <div className="card">
+        <h2>Exam Results</h2>
+
         <div className="table-container">
           <table>
             <thead>
@@ -73,91 +206,39 @@ const Exams = () => {
                 <th>Remarks</th>
               </tr>
             </thead>
+
             <tbody>
               {exams.map(exam => (
                 <tr key={exam.exam_id}>
                   <td>{exam.student_name}</td>
                   <td>{exam.course_code}</td>
                   <td>{exam.exam_type}</td>
-                  <td>{exam.exam_date ? new Date(exam.exam_date).toLocaleDateString() : 'N/A'}</td>
-                  <td>{exam.obtained_marks ?? 'Not graded'}/{exam.total_marks}</td>
-                  <td><strong>{exam.grade || '-'}</strong></td>
+
+                  <td>
+                    {exam.exam_date
+                      ? new Date(exam.exam_date).toLocaleDateString()
+                      : 'N/A'}
+                  </td>
+
+                  <td>
+                    {exam.obtained_marks ?? 'Not graded'}/{exam.total_marks}
+                  </td>
+
+                  <td>
+                    <strong>{exam.grade || '-'}</strong>
+                  </td>
+
                   <td>{exam.remarks || '-'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        {exams.length === 0 && <div className="empty-state">No exam records found</div>}
+
+        {exams.length === 0 && (
+          <div className="empty-state">No exam records found</div>
+        )}
       </div>
-
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">Record Exam Result</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>&times;</button>
-            </div>
-
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label className="form-label">Enrollment *</label>
-                <select className="form-select" value={formData.enrollment_id}
-                  onChange={(e) => setFormData({...formData, enrollment_id: e.target.value})} required>
-                  <option value="">Select Enrollment</option>
-                  {enrollments.map(e => (
-                    <option key={e.enrollment_id} value={e.enrollment_id}>
-                      {e.registration_no} - {e.student_name} | {e.course_code} ({e.academic_year})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Exam Type *</label>
-                  <select className="form-select" value={formData.exam_type}
-                    onChange={(e) => setFormData({...formData, exam_type: e.target.value})}>
-                    <option value="Midterm">Midterm</option>
-                    <option value="Final">Final</option>
-                    <option value="Quiz">Quiz</option>
-                    <option value="Assignment">Assignment</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Exam Date</label>
-                  <input type="date" className="form-input" value={formData.exam_date}
-                    onChange={(e) => setFormData({...formData, exam_date: e.target.value})} />
-                </div>
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Total Marks *</label>
-                  <input type="number" className="form-input" value={formData.total_marks}
-                    onChange={(e) => setFormData({...formData, total_marks: e.target.value})} required />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Obtained Marks</label>
-                  <input type="number" className="form-input" value={formData.obtained_marks}
-                    onChange={(e) => setFormData({...formData, obtained_marks: e.target.value})} />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Remarks</label>
-                <input type="text" className="form-input" value={formData.remarks}
-                  onChange={(e) => setFormData({...formData, remarks: e.target.value})} />
-              </div>
-
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Result</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

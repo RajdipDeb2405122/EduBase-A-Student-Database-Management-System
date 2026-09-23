@@ -204,12 +204,12 @@ router.post('/courses/:id', wrap(async (req, res) => {
     409
   );
 
-  const r = await pool.query(`
+  const r = await transaction(db => db.query(`
     INSERT INTO course_teacher (course_id,faculty_id)
     VALUES ($1,$2)
     ON CONFLICT (course_id,faculty_id) DO NOTHING
     RETURNING course_id
-  `, [courseId, req.user.faculty_id]);
+  `, [courseId, req.user.faculty_id]));
 
   check(
     r.rowCount,
@@ -224,26 +224,28 @@ router.delete('/courses/:id', wrap(async (req, res) => {
   const courseId = id(req.params.id);
   const facultyId = req.user.faculty_id;
 
-  const r = await pool.query(`
-    DELETE FROM course_teacher
-    WHERE course_id=$1 AND faculty_id=$2
-    RETURNING course_id
-  `, [courseId, facultyId]);
-
-  if (!r.rowCount) {
-    // Legacy assignment recorded only on course.faculty_id.
-    const legacy = await pool.query(`
-      UPDATE course SET faculty_id=NULL
+  await transaction(async db => {
+    const r = await db.query(`
+      DELETE FROM course_teacher
       WHERE course_id=$1 AND faculty_id=$2
       RETURNING course_id
     `, [courseId, facultyId]);
 
-    check(
-      legacy.rowCount,
-      'You are not assigned to this course',
-      403
-    );
-  }
+    if (!r.rowCount) {
+      // Legacy assignment recorded only on course.faculty_id.
+      const legacy = await db.query(`
+        UPDATE course SET faculty_id=NULL
+        WHERE course_id=$1 AND faculty_id=$2
+        RETURNING course_id
+      `, [courseId, facultyId]);
+
+      check(
+        legacy.rowCount,
+        'You are not assigned to this course',
+        403
+      );
+    }
+  });
 
   res.json({
     message: 'Teaching assignment removed. Academic records were kept.'

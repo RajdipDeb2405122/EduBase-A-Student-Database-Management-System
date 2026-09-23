@@ -537,7 +537,7 @@ const StudentDashboard = () => {
               <div>
                 <strong>CGPA:</strong>{' '}
                 {Number(
-                  profile?.current_cgpa || 0
+                  profile?.computed_cgpa ?? profile?.current_cgpa ?? 0
                 ).toFixed(2)}
               </div>
             </div>

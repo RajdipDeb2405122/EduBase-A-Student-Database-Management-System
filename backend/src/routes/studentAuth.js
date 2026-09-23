@@ -5,7 +5,8 @@ const auth = require('../middleware/auth');
 const {
   wrap,
   check,
-  id
+  id,
+  transaction
 } = require('../lib/common');
 
 const { login } = require('../lib/login');
@@ -50,6 +51,7 @@ router.get('/me/:id', wrap(async (req, res) => {
       s.*,
       u.username,
       u.last_login,
+      compute_cgpa(s.student_id) AS computed_cgpa,
       p.program_name,
       p.degree_level,
       d.department_name,
@@ -210,36 +212,46 @@ router.post(
 
     check(offer, 'Select one of the available scholarships', 400);
 
-    const existing = await pool.query(`
-      SELECT status
-      FROM scholarship_application
-      WHERE student_id=$1
-        AND scholarship_name=$2
-        AND status IN ('pending', 'approved')
-    `, [req.user.student_id, offer.scholarship_name]);
+    const result = await transaction(async db => {
+      // Serialise concurrent applications from the same student.
+      await db.query(
+        'SELECT pg_advisory_xact_lock(4101, $1)',
+        [req.user.student_id]
+      );
 
-    check(
-      !existing.rowCount,
+      const existing = await db.query(`
+        SELECT status
+        FROM scholarship_application
+        WHERE student_id=$1
+          AND scholarship_name=$2
+          AND status IN ('pending', 'approved')
+      `, [req.user.student_id, offer.scholarship_name]);
 
-      existing.rows[0]?.status === 'approved'
-        ? 'You have already been awarded this scholarship'
-        : 'Your application for this scholarship is awaiting admin review',
+      check(
+        !existing.rowCount,
 
-      409
-    );
+        existing.rows[0]?.status === 'approved'
+          ? 'You have already been awarded this scholarship'
+          : 'Your application for this scholarship is awaiting admin review',
 
-    const result = await pool.query(`
-      INSERT INTO scholarship_application (
-        student_id, scholarship_name, award_type, amount
-      )
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `, [
-      req.user.student_id,
-      offer.scholarship_name,
-      offer.award_type,
-      offer.amount
-    ]);
+        409
+      );
+
+      const inserted = await db.query(`
+        INSERT INTO scholarship_application (
+          student_id, scholarship_name, award_type, amount
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+      `, [
+        req.user.student_id,
+        offer.scholarship_name,
+        offer.award_type,
+        offer.amount
+      ]);
+
+      return inserted;
+    });
 
     res.status(201).json(result.rows[0]);
   })

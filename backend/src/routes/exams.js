@@ -98,70 +98,27 @@ router.get('/publish-requests', wrap(async (req, res) => {
 const reviewPublishRequest = decision => wrap(async (req, res) => {
   await ensureExamPublishTables();
 
+  const requestId = id(req.params.id, 'request');
+
   const message = await transaction(async db => {
-    const found = await db.query(`
-      SELECT request_id, exam_id
-      FROM exam_publish_requests
-      WHERE request_id=$1
-        AND status='pending'
-      FOR UPDATE
-    `, [id(req.params.id, 'request')]);
+    // Stored procedure performs the whole multi-table workflow:
+    // request status -> zero-fill blank marks -> publish exam -> audit log.
+    let students;
 
-    check(
-      found.rowCount,
-      'Request not found or already reviewed',
-      409
-    );
-
-    const total = await db.query(`
-      SELECT count(*)::int AS n
-      FROM exam_result
-      WHERE exam_id=$1
-    `, [found.rows[0].exam_id]);
-
-    const students = total.rows[0].n;
-
-    await db.query(`
-      UPDATE exam_publish_requests
-      SET status=$1,
-          reviewed_by_admin_id=$2,
-          reviewed_on=CURRENT_TIMESTAMP
-      WHERE request_id=$3
-    `, [
-      decision,
-      req.admin.admin_id,
-      found.rows[0].request_id
-    ]);
-
-    if (decision === 'approved') {
-      // Students whose marks were never entered count as 0.
-      // 0 marks always grade to F.
-      await db.query(`
-        UPDATE exam_result
-        SET obtained_marks=0,
-            grade='F',
-            updated_at=CURRENT_TIMESTAMP
-        WHERE exam_id=$1
-          AND obtained_marks IS NULL
-      `, [found.rows[0].exam_id]);
-
-      // Every student's result for this exam is published together.
-      await db.query(
-        'UPDATE exam SET published=TRUE WHERE exam_id=$1',
-        [found.rows[0].exam_id]
+    try {
+      const result = await db.query(
+        'CALL review_exam_publish($1, $2, $3, NULL)',
+        [requestId, req.admin.admin_id, decision]
       );
-    }
 
-    await log(
-      db,
-      req.admin.admin_id,
-      'exam_publish_requests',
-      found.rows[0].request_id,
-      decision === 'approved' ? 'APPROVE' : 'REJECT',
-      decision === 'approved'
-        ? 'Approved exam publication; all student results published, blank marks recorded as 0'
-        : 'Rejected exam publication request'
-    );
+      students = result.rows[0]?.p_students ?? 0;
+    } catch (error) {
+      if (error.code === 'P0002') {
+        check(false, 'Request not found or already reviewed', 409);
+      }
+
+      throw error;
+    }
 
     return decision === 'approved'
       ? `Accepted. All ${students} student results for this exam are now published. Blank marks were recorded as 0.`

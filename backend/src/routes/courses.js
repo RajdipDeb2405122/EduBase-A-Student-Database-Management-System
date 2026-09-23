@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../config/database');
 const auth = require('../middleware/auth');
+const { transaction, check } = require('../lib/common');
 
 const router = express.Router();
 
@@ -92,40 +93,44 @@ router.post('/', auth, async (req, res) => {
       active
     } = req.body;
 
-    const result = await pool.query(
-      `INSERT INTO course (
-        program_id, faculty_id, course_code, course_title,
-        credit_hours, term_no, course_type, active
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *`,
-      [
-        program_id,
-        faculty_id || null,
-        course_code,
-        course_title,
-        credit_hours,
-        term_no,
-        course_type,
-        active !== false
-      ]
-    );
+    const result = await transaction(async db => {
+      const result = await db.query(
+        `INSERT INTO course (
+          program_id, faculty_id, course_code, course_title,
+          credit_hours, term_no, course_type, active
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING *`,
+        [
+          program_id,
+          faculty_id || null,
+          course_code,
+          course_title,
+          credit_hours,
+          term_no,
+          course_type,
+          active !== false
+        ]
+      );
 
-    await pool.query(
-      `INSERT INTO admin_action_log (
-        admin_id, target_table, target_id, action_type, new_value
-      )
-      VALUES ($1, 'course', $2, 'CREATE', $3)`,
-      [
-        req.admin.admin_id,
-        result.rows[0].course_id,
-        `Created course: ${course_code} - ${course_title}`
-      ]
-    );
+      await db.query(
+        `INSERT INTO admin_action_log (
+          admin_id, target_table, target_id, action_type, new_value
+        )
+        VALUES ($1, 'course', $2, 'CREATE', $3)`,
+        [
+          req.admin.admin_id,
+          result.rows[0].course_id,
+          `Created course: ${course_code} - ${course_title}`
+        ]
+      );
+
+      return result;
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -143,73 +148,77 @@ router.put('/:id', auth, async (req, res) => {
       active
     } = req.body;
 
-    const result = await pool.query(
-      `UPDATE course
-       SET program_id = $1,
-           faculty_id = $2,
-           course_code = $3,
-           course_title = $4,
-           credit_hours = $5,
-           term_no = $6,
-           course_type = $7,
-           active = $8
-       WHERE course_id = $9
-       RETURNING *`,
-      [
-        program_id,
-        faculty_id || null,
-        course_code,
-        course_title,
-        credit_hours,
-        term_no,
-        course_type,
-        active,
-        req.params.id
-      ]
-    );
+    const result = await transaction(async db => {
+      const result = await db.query(
+        `UPDATE course
+         SET program_id = $1,
+             faculty_id = $2,
+             course_code = $3,
+             course_title = $4,
+             credit_hours = $5,
+             term_no = $6,
+             course_type = $7,
+             active = $8
+         WHERE course_id = $9
+         RETURNING *`,
+        [
+          program_id,
+          faculty_id || null,
+          course_code,
+          course_title,
+          credit_hours,
+          term_no,
+          course_type,
+          active,
+          req.params.id
+        ]
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Course not found' });
-    }
+      check(result.rows.length > 0, 'Course not found', 404);
 
-    await pool.query(
-      `INSERT INTO admin_action_log (
-        admin_id, target_table, target_id, action_type, new_value
-      )
-      VALUES ($1, 'course', $2, 'UPDATE', $3)`,
-      [
-        req.admin.admin_id,
-        req.params.id,
-        `Updated course: ${course_code}`
-      ]
-    );
+      await db.query(
+        `INSERT INTO admin_action_log (
+          admin_id, target_table, target_id, action_type, new_value
+        )
+        VALUES ($1, 'course', $2, 'UPDATE', $3)`,
+        [
+          req.admin.admin_id,
+          req.params.id,
+          `Updated course: ${course_code}`
+        ]
+      );
+
+      return result;
+    });
 
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 // Delete course
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const result = await pool.query(
-      'DELETE FROM course WHERE course_id = $1 RETURNING *',
-      [req.params.id]
-    );
+    const result = await transaction(async db => {
+      const result = await db.query(
+        'DELETE FROM course WHERE course_id = $1 RETURNING *',
+        [req.params.id]
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Course not found' });
-    }
+      check(result.rows.length > 0, 'Course not found', 404);
 
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, old_value)
-       VALUES ($1, 'course', $2, 'DELETE', $3)`,
-      [req.admin.admin_id, req.params.id, `Deleted course: ${result.rows[0].course_code}`]
-    );
+      await db.query(
+        `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, old_value)
+         VALUES ($1, 'course', $2, 'DELETE', $3)`,
+        [req.admin.admin_id, req.params.id, `Deleted course: ${result.rows[0].course_code}`]
+      );
+
+      return result;
+    });
 
     res.json({ message: 'Course deleted successfully' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

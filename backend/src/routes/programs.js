@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../config/database');
 const auth = require('../middleware/auth');
+const { transaction, check } = require('../lib/common');
 
 const router = express.Router();
 
@@ -28,7 +29,7 @@ router.get('/:id', async (req, res) => {
       LEFT JOIN department d ON p.department_id = d.department_id 
       WHERE p.program_id = $1
     `, [req.params.id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Program not found' });
     }
@@ -55,21 +56,25 @@ router.get('/department/:deptId', async (req, res) => {
 router.post('/', auth, async (req, res) => {
   try {
     const { department_id, program_name, degree_level, duration_years, total_credits } = req.body;
-    const result = await pool.query(
-      `INSERT INTO program (department_id, program_name, degree_level, duration_years, total_credits)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [department_id, program_name, degree_level, duration_years, total_credits]
-    );
+    const result = await transaction(async db => {
+      const result = await db.query(
+        `INSERT INTO program (department_id, program_name, degree_level, duration_years, total_credits)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [department_id, program_name, degree_level, duration_years, total_credits]
+      );
 
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'program', $2, 'CREATE', $3)`,
-      [req.admin.admin_id, result.rows[0].program_id, `Created program: ${program_name}`]
-    );
+      await db.query(
+        `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
+         VALUES ($1, 'program', $2, 'CREATE', $3)`,
+        [req.admin.admin_id, result.rows[0].program_id, `Created program: ${program_name}`]
+      );
+
+      return result;
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -77,49 +82,53 @@ router.post('/', auth, async (req, res) => {
 router.put('/:id', auth, async (req, res) => {
   try {
     const { department_id, program_name, degree_level, duration_years, total_credits } = req.body;
-    const result = await pool.query(
-      `UPDATE program SET department_id = $1, program_name = $2, degree_level = $3, 
-       duration_years = $4, total_credits = $5 WHERE program_id = $6 RETURNING *`,
-      [department_id, program_name, degree_level, duration_years, total_credits, req.params.id]
-    );
+    const result = await transaction(async db => {
+      const result = await db.query(
+        `UPDATE program SET department_id = $1, program_name = $2, degree_level = $3, 
+         duration_years = $4, total_credits = $5 WHERE program_id = $6 RETURNING *`,
+        [department_id, program_name, degree_level, duration_years, total_credits, req.params.id]
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Program not found' });
-    }
+      check(result.rows.length > 0, 'Program not found', 404);
 
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
-       VALUES ($1, 'program', $2, 'UPDATE', $3)`,
-      [req.admin.admin_id, req.params.id, `Updated program: ${program_name}`]
-    );
+      await db.query(
+        `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, new_value)
+         VALUES ($1, 'program', $2, 'UPDATE', $3)`,
+        [req.admin.admin_id, req.params.id, `Updated program: ${program_name}`]
+      );
+
+      return result;
+    });
 
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
 // Delete program
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const result = await pool.query(
-      'DELETE FROM program WHERE program_id = $1 RETURNING *',
-      [req.params.id]
-    );
+    const result = await transaction(async db => {
+      const result = await db.query(
+        'DELETE FROM program WHERE program_id = $1 RETURNING *',
+        [req.params.id]
+      );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Program not found' });
-    }
+      check(result.rows.length > 0, 'Program not found', 404);
 
-    await pool.query(
-      `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, old_value)
-       VALUES ($1, 'program', $2, 'DELETE', $3)`,
-      [req.admin.admin_id, req.params.id, `Deleted program: ${result.rows[0].program_name}`]
-    );
+      await db.query(
+        `INSERT INTO admin_action_log (admin_id, target_table, target_id, action_type, old_value)
+         VALUES ($1, 'program', $2, 'DELETE', $3)`,
+        [req.admin.admin_id, req.params.id, `Deleted program: ${result.rows[0].program_name}`]
+      );
+
+      return result;
+    });
 
     res.json({ message: 'Program deleted successfully' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

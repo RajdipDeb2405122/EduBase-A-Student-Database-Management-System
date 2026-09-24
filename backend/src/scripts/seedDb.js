@@ -5,6 +5,8 @@ require('dotenv').config();
 // Fresh/demo database only.
 // Run after db:init and BEFORE db:migrate.
 // WARNING: TRUNCATE below deletes existing data.
+// Courses are not seeded here: after db:migrate, load the catalog
+// with db:seed-catalog (or the full demo with db:seed-demo).
 
 async function seedDatabase() {
   const pool = new Pool({
@@ -252,63 +254,6 @@ async function seedDatabase() {
 
     console.log('Seeded admin records');
 
-    // Courses
-    await pool.query(`
-      INSERT INTO course (
-        program_id,
-        faculty_id,
-        course_code,
-        course_title,
-        credit_hours,
-        term_no,
-        course_type,
-        active
-      )
-      VALUES
-        (
-          1, 1, 'CSE101', 'Introduction to Programming',
-          3.00, 1, 'Core', TRUE
-        ),
-        (
-          1, 2, 'CSE102', 'Data Structures',
-          4.00, 2, 'Core', TRUE
-        ),
-        (
-          1, 3, 'CSE201', 'Algorithms',
-          3.00, 3, 'Core', TRUE
-        ),
-        (
-          1, 1, 'CSE301', 'Database Systems',
-          3.00, 5, 'Core', TRUE
-        ),
-        (
-          1, 2, 'CSE302', 'Operating Systems',
-          3.00, 5, 'Core', TRUE
-        ),
-        (
-          1, 3, 'CSE401', 'Software Engineering',
-          3.00, 7, 'Core', TRUE
-        ),
-        (
-          1, NULL, 'CSE450', 'Capstone Project',
-          6.00, 8, 'Project', TRUE
-        ),
-        (
-          2, 1, 'CSE501', 'Advanced Algorithms',
-          3.00, 1, 'Core', TRUE
-        ),
-        (
-          3, 4, 'EEE101', 'Circuit Theory',
-          4.00, 1, 'Core', TRUE
-        ),
-        (
-          6, 7, 'BBA101', 'Principles of Management',
-          3.00, 1, 'Core', TRUE
-        )
-    `);
-
-    console.log('Seeded courses');
-
     // Student parent accounts
     await pool.query(`
       INSERT INTO users (
@@ -422,90 +367,6 @@ async function seedDatabase() {
 
     console.log('Seeded students');
 
-    // Enrollments
-    await pool.query(`
-      INSERT INTO enrollment (
-        student_id,
-        course_id,
-        authorized_by_admin_id,
-        academic_year,
-        term,
-        status
-      )
-      VALUES
-        (1, 1, 1, '2021-2022', 'Fall', 'enrolled'),
-        (1, 2, 1, '2022-2023', 'Spring', 'enrolled'),
-        (1, 3, 1, '2022-2023', 'Fall', 'enrolled'),
-        (2, 1, 1, '2021-2022', 'Fall', 'enrolled'),
-        (2, 2, 1, '2022-2023', 'Spring', 'enrolled'),
-        (3, 2, 1, '2022-2023', 'Fall', 'enrolled'),
-        (3, 3, 1, '2023-2024', 'Spring', 'enrolled'),
-        (4, 2, 1, '2022-2023', 'Fall', 'enrolled'),
-        (4, 3, 1, '2023-2024', 'Spring', 'enrolled'),
-        (5, 5, 2, '2023-2024', 'Fall', 'enrolled'),
-        (6, 9, 1, '2021-2022', 'Fall', 'enrolled'),
-        (7, 10, 2, '2022-2023', 'Fall', 'enrolled')
-    `);
-
-    console.log('Seeded enrollments');
-
-    // Original per-student exam records.
-    // The subsequent migration converts these to exam + exam_result.
-    await pool.query(`
-      INSERT INTO exam (
-        enrollment_id,
-        exam_type,
-        exam_date,
-        total_marks,
-        obtained_marks,
-        grade,
-        remarks
-      )
-      VALUES
-        (
-          1, 'Midterm', '2021-11-15',
-          100.00, 75.00, 'B+', 'Good performance'
-        ),
-        (
-          1, 'Final', '2021-12-20',
-          100.00, 82.00, 'A-', 'Excellent'
-        ),
-        (
-          2, 'Midterm', '2022-04-10',
-          100.00, 68.00, 'B', 'Average'
-        ),
-        (
-          2, 'Final', '2022-05-15',
-          100.00, 78.00, 'B+', 'Good'
-        ),
-        (
-          3, 'Midterm', '2022-11-12',
-          100.00, 70.00, 'B', 'Satisfactory'
-        ),
-        (
-          4, 'Midterm', '2021-11-15',
-          100.00, 88.00, 'A', 'Outstanding'
-        ),
-        (
-          4, 'Final', '2021-12-20',
-          100.00, 92.00, 'A+', 'Excellent'
-        ),
-        (
-          5, 'Midterm', '2022-04-10',
-          100.00, 85.00, 'A-', 'Very Good'
-        ),
-        (
-          6, 'Midterm', '2022-11-12',
-          100.00, 65.00, 'C+', 'Needs improvement'
-        ),
-        (
-          7, 'Midterm', '2023-04-08',
-          100.00, 72.00, 'B', 'Satisfactory'
-        )
-    `);
-
-    console.log('Seeded exams');
-
     // Scholarships
     await pool.query(`
       INSERT INTO scholarship (
@@ -610,16 +471,8 @@ async function seedDatabase() {
           NULL, 'Student Jahanara Begum admitted'
         ),
         (
-          1, 'enrollment', 1, 'AUTHORIZE',
-          NULL, 'Enrollment authorized'
-        ),
-        (
           2, 'student', 5, 'VERIFY',
           NULL, 'Student verified'
-        ),
-        (
-          1, 'enrollment', 10, 'AUTHORIZE',
-          NULL, 'Enrollment authorized'
         )
     `);
 

@@ -14,6 +14,11 @@ import ProfileEditor from '../components/ProfileEditor'
 import ProfileAvatar from '../components/ProfileAvatar'
 import CoursePaymentPanel from '../components/CoursePaymentPanel'
 import PaymentHistory from '../components/PaymentHistory'
+import CgpaValue, { formatCgpa } from '../components/CgpaValue'
+
+const TERM_OPTIONS = [1, 2, 3, 4].flatMap(level =>
+  [1, 2].map(term => ({ level, term, label: `Level ${level}, Term ${term}` }))
+)
 
 const StudentDashboard = () => {
   const { student, logout } = useStudentAuth()
@@ -25,21 +30,18 @@ const StudentDashboard = () => {
     'edubase_student_view',
     {
       tab: 'profile',
-      level: '',
       year: `${currentYear}-${currentYear + 1}`,
-      term: 'Fall'
+      resultTerm: ''
     }
   )
 
   const activeTab = view.tab
-  const selectedLevel = view.level
   const regYear = view.year
-  const regTerm = view.term
+  const resultTerm = view.resultTerm
 
   const setActiveTab = tab => setView({ tab })
-  const setSelectedLevel = level => setView({ level })
   const setRegYear = year => setView({ year })
-  const setRegTerm = term => setView({ term })
+  const setResultTerm = value => setView({ resultTerm: value })
 
   const academicYears = [
     ...new Set([
@@ -54,9 +56,10 @@ const StudentDashboard = () => {
 
   const [profile, setProfile] = useState(null)
   const [enrollments, setEnrollments] = useState([])
-  const [courseRequests, setCourseRequests] = useState([])
-  const [availableCourses, setAvailableCourses] = useState([])
-  const [exams, setExams] = useState([])
+  const [registrations, setRegistrations] = useState([])
+  const [termInfo, setTermInfo] = useState(null)
+  const [result, setResult] = useState(null)
+  const [resultLoading, setResultLoading] = useState(false)
   const [payments, setPayments] = useState([])
   const [scholarships, setScholarships] = useState([])
   const [scholarshipOptions, setScholarshipOptions] = useState([])
@@ -67,7 +70,7 @@ const StudentDashboard = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [requestingCourse, setRequestingCourse] = useState(null)
+  const [registering, setRegistering] = useState(false)
 
   const [paymentConfig, setPaymentConfig] = useState({
     enabled: false
@@ -79,6 +82,7 @@ const StudentDashboard = () => {
 
   const dataVersion = useRef(0)
   const coursesVersion = useRef(0)
+  const resultVersion = useRef(0)
 
   const loadProfile = useCallback(async () => {
     if (!studentId) return
@@ -90,7 +94,6 @@ const StudentDashboard = () => {
         person,
         enrolled,
         requests,
-        results,
         paid,
         awards,
         scholarshipOpts,
@@ -100,8 +103,7 @@ const StudentDashboard = () => {
       ] = await Promise.all([
         api.get(`/student-auth/me/${studentId}`),
         api.get(`/student-auth/me/${studentId}/enrollments`),
-        api.get(`/student-auth/me/${studentId}/course-requests`),
-        api.get(`/student-auth/me/${studentId}/exams`),
+        api.get(`/student-auth/me/${studentId}/registrations`),
         api.get(`/student-auth/me/${studentId}/payments`),
         api.get(`/student-auth/me/${studentId}/scholarships`),
         api.get(`/student-auth/me/${studentId}/scholarship-options`),
@@ -118,8 +120,7 @@ const StudentDashboard = () => {
       })
 
       setEnrollments(enrolled.data)
-      setCourseRequests(requests.data)
-      setExams(results.data)
+      setRegistrations(requests.data)
       setPayments(paid.data)
       setScholarships(awards.data)
       setScholarshipOptions(scholarshipOpts.data)
@@ -137,29 +138,56 @@ const StudentDashboard = () => {
     }
   }, [studentId])
 
-  const loadAvailableCourses = useCallback(async () => {
+  // Only the student's own department + current level/term.
+  const loadTerm = useCallback(async () => {
     if (!studentId) return
 
     const version = ++coursesVersion.current
 
     try {
-      const query = selectedLevel
-        ? `?level=${selectedLevel}`
-        : ''
-
       const { data } = await api.get(
-        `/student-auth/courses/${studentId}${query}`
+        `/student-auth/courses/${studentId}`
       )
 
       if (version === coursesVersion.current) {
-        setAvailableCourses(data)
+        setTermInfo(data)
       }
     } catch (error) {
       if (version === coursesVersion.current) {
         setError(error.message)
       }
     }
-  }, [studentId, selectedLevel])
+  }, [studentId])
+
+  const loadResult = useCallback(async () => {
+    if (!studentId || !resultTerm) {
+      setResult(null)
+      return
+    }
+
+    const version = ++resultVersion.current
+    const [level, term] = resultTerm.split('-')
+
+    setResultLoading(true)
+
+    try {
+      const { data } = await api.get(
+        `/student-auth/me/${studentId}/results?level=${level}&term=${term}`
+      )
+
+      if (version === resultVersion.current) {
+        setResult(data)
+      }
+    } catch (error) {
+      if (version === resultVersion.current) {
+        setError(error.message)
+      }
+    } finally {
+      if (version === resultVersion.current) {
+        setResultLoading(false)
+      }
+    }
+  }, [studentId, resultTerm])
 
   useEffect(() => {
     if (!studentId) {
@@ -172,45 +200,58 @@ const StudentDashboard = () => {
     return () => {
       dataVersion.current++
       coursesVersion.current++
+      resultVersion.current++
     }
   }, [studentId, loadProfile, navigate])
 
   useEffect(() => {
     if (activeTab === 'courses') {
-      void loadAvailableCourses()
+      void loadTerm()
     }
-  }, [activeTab, loadAvailableCourses])
+  }, [activeTab, loadTerm])
+
+  useEffect(() => {
+    if (activeTab === 'results') {
+      void loadResult()
+    }
+  }, [activeTab, loadResult])
 
   useLiveUpdates(async () => {
     await loadProfile()
 
     if (activeTab === 'courses') {
-      await loadAvailableCourses()
+      await loadTerm()
+    }
+
+    if (activeTab === 'results') {
+      await loadResult()
     }
   })
 
-  const handleRequestCourse = async courseId => {
-    setRequestingCourse(courseId)
+  // All courses of the term are mandatory and submitted together.
+  const handleRegisterTerm = async () => {
+    if (!termInfo || registering) return
+
+    setRegistering(true)
     setMessage('')
     setError('')
 
     try {
       await api.post('/course-registration/request', {
         student_id: studentId,
-        course_id: courseId,
-        academic_year: regYear,
-        term: regTerm
+        course_ids: termInfo.courses.map(course => course.course_id),
+        academic_year: regYear
       })
 
       setMessage(
-        'Request submitted. The decision will appear here automatically.'
+        'Registration submitted for all courses of your term. The decision will appear here automatically.'
       )
 
-      await loadProfile()
+      await Promise.all([loadProfile(), loadTerm()])
     } catch (error) {
       setError(error.message)
     } finally {
-      setRequestingCourse(null)
+      setRegistering(false)
     }
   }
 
@@ -297,20 +338,19 @@ const StudentDashboard = () => {
     { id: 'scholarships', label: 'Scholarships', icon: '🎓' }
   ]
 
-  const requestDecision = request => {
-    if (request.status !== 'approved') {
-      return request.rejection_reason || 'Awaiting admin review'
+  const registration = termInfo?.registration
+  const openRegistration =
+    registration && registration.status !== 'rejected'
+
+  const registrationText = item => {
+    if (item.status === 'pending') return 'Awaiting admin approval'
+    if (item.status === 'rejected') {
+      return item.rejection_reason || 'Rejected'
     }
 
-    if (request.enrollment_status === 'pending_payment') {
-      return 'Pending Payment — ৳1,000'
-    }
-
-    if (request.enrollment_status === 'enrolled') {
-      return 'Enrolled'
-    }
-
-    return request.enrollment_status || 'Contact registrar'
+    return item.complete
+      ? 'Complete — all courses enrolled'
+      : `Approved — ${item.active_count} of ${item.courses.length} course fees paid`
   }
 
   return (
@@ -428,9 +468,7 @@ const StudentDashboard = () => {
 
               <div>
                 <strong>CGPA:</strong>{' '}
-                {Number(
-                  profile?.current_cgpa || 0
-                ).toFixed(2)}
+                <CgpaValue value={profile?.current_cgpa} />
               </div>
             </div>
 
@@ -442,6 +480,11 @@ const StudentDashboard = () => {
                       profile.admission_date
                     ).toLocaleDateString()
                   : 'N/A'}
+              </div>
+
+              <div>
+                <strong>Current term:</strong>{' '}
+                Level {profile?.current_level}, Term {profile?.current_term}
               </div>
 
               <div>
@@ -528,48 +571,184 @@ const StudentDashboard = () => {
               className="card"
               style={{ marginBottom: '1.5rem' }}
             >
-              <h3>My course requests — live status</h3>
+              <h3>
+                Term registration
+                {termInfo && ` — ${termInfo.department_code} Level ${termInfo.level}, Term ${termInfo.term}`}
+              </h3>
 
-              {courseRequests.length ? (
+              <p>
+                All {termInfo?.required ?? 5} courses of your current
+                term are mandatory and are registered together.
+                Registration is complete once every course fee is paid.
+              </p>
+
+              {!termInfo ? (
+                <div className="spinner" />
+              ) : (
+                <>
+                  <div className="table-container">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Course Code</th>
+                          <th>Course Title</th>
+                          <th>Credits</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {termInfo.courses.map(course => {
+                          const row = openRegistration
+                            ? registration.courses.find(
+                                item => item.course_id === course.course_id
+                              )
+                            : null
+
+                          return (
+                            <tr key={course.course_id}>
+                              <td>{course.course_code}</td>
+                              <td>{course.course_title}</td>
+                              <td>{course.credit_hours}</td>
+
+                              <td>
+                                {row?.enrollment_status === 'pending_payment' ? (
+                                  <span className="badge badge-warning">
+                                    Pending Payment — pay above
+                                  </span>
+                                ) : row?.enrollment_status ? (
+                                  <span className={`badge badge-${
+                                    row.enrollment_status === 'dropped'
+                                      ? 'danger'
+                                      : 'success'
+                                  }`}>
+                                    {row.enrollment_status === 'enrolled'
+                                      ? 'Enrolled'
+                                      : row.enrollment_status}
+                                  </span>
+                                ) : registration?.status === 'pending' ? (
+                                  <span className="badge badge-warning">
+                                    Pending approval
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-secondary">
+                                    Not registered
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {!termInfo.courses.length && (
+                    <p className="empty-state">
+                      No courses are listed for your term yet.
+                    </p>
+                  )}
+
+                  {openRegistration ? (
+                    <p>
+                      <span className={`badge badge-${
+                        registration.complete ? 'success' : 'warning'
+                      }`}>
+                        {registrationText(registration)}
+                      </span>
+                    </p>
+                  ) : (
+                    <div className="form-row" style={{ alignItems: 'flex-end' }}>
+                      <div className="form-group">
+                        <label className="form-label">
+                          Academic Year
+                        </label>
+
+                        <select
+                          className="form-select"
+                          value={regYear}
+                          onChange={event =>
+                            setRegYear(event.target.value)
+                          }
+                        >
+                          {academicYears.map(year => (
+                            <option key={year} value={year}>
+                              {year}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="form-group">
+                        <button
+                          className="btn btn-primary"
+                          disabled={
+                            registering ||
+                            termInfo.courses.length !== termInfo.required
+                          }
+                          onClick={handleRegisterTerm}
+                        >
+                          {registering
+                            ? 'Submitting…'
+                            : `Register for all ${termInfo.courses.length} courses`}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {registration?.status === 'rejected' && (
+                    <p>
+                      Your previous request was rejected:
+                      {' '}
+                      {registration.rejection_reason || 'no reason given'}.
+                      You can submit again.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="card">
+              <h3>My registrations</h3>
+
+              {registrations.length ? (
                 <div className="table-container">
                   <table>
                     <thead>
                       <tr>
-                        <th>Course</th>
-                        <th>Year / term</th>
+                        <th>Term</th>
+                        <th>Year</th>
+                        <th>Courses</th>
                         <th>Status</th>
-                        <th>Decision / reason</th>
                       </tr>
                     </thead>
 
                     <tbody>
-                      {courseRequests.map(request => (
-                        <tr key={request.request_id}>
+                      {registrations.map(item => (
+                        <tr key={item.registration_id}>
                           <td>
-                            {request.course_code}
-                            {' — '}
-                            {request.course_title}
+                            {item.department_code} {item.level}-{item.term}
                           </td>
 
+                          <td>{item.academic_year}</td>
+
                           <td>
-                            {request.academic_year}
-                            {' / '}
-                            {request.term}
+                            {item.courses
+                              .map(course => course.course_code)
+                              .join(', ')}
                           </td>
 
                           <td>
                             <span className={`badge badge-${
-                              request.status === 'approved'
-                                ? 'success'
-                                : request.status === 'rejected'
-                                  ? 'danger'
+                              item.status === 'rejected'
+                                ? 'danger'
+                                : item.complete
+                                  ? 'success'
                                   : 'warning'
                             }`}>
-                              {request.status}
+                              {registrationText(item)}
                             </span>
                           </td>
-
-                          <td>{requestDecision(request)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -577,160 +756,7 @@ const StudentDashboard = () => {
                 </div>
               ) : (
                 <p className="empty-state">
-                  No course requests yet
-                </p>
-              )}
-            </div>
-
-            <div className="card">
-              <h3>Request New Courses</h3>
-
-              <div
-                className="form-row"
-                style={{ marginBottom: '1rem' }}
-              >
-                <div className="form-group">
-                  <label className="form-label">
-                    Filter by Level
-                  </label>
-
-                  <select
-                    className="form-select"
-                    value={selectedLevel}
-                    onChange={event =>
-                      setSelectedLevel(event.target.value)
-                    }
-                  >
-                    <option value="">All Levels</option>
-                    <option value="1">Level 1</option>
-                    <option value="2">Level 2</option>
-                    <option value="3">Level 3</option>
-                    <option value="4">Level 4</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">
-                    Academic Year
-                  </label>
-
-                  <select
-                    className="form-select"
-                    value={regYear}
-                    onChange={event =>
-                      setRegYear(event.target.value)
-                    }
-                  >
-                    {academicYears.map(year => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">
-                    Term
-                  </label>
-
-                  <select
-                    className="form-select"
-                    value={regTerm}
-                    onChange={event =>
-                      setRegTerm(event.target.value)
-                    }
-                  >
-                    <option value="Fall">Fall</option>
-                    <option value="Spring">Spring</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="table-container">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Course Code</th>
-                      <th>Course Title</th>
-                      <th>Credits</th>
-                      <th>Level / term</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {availableCourses.map(course => {
-                      const currentEnrollment =
-                        enrollments.find(enrollment =>
-                          enrollment.course_id === course.course_id &&
-                          enrollment.academic_year === regYear &&
-                          enrollment.term === regTerm
-                        )
-
-                      const hasPending = courseRequests.some(
-                        request =>
-                          request.course_id === course.course_id &&
-                          request.academic_year === regYear &&
-                          request.term === regTerm &&
-                          request.status === 'pending'
-                      )
-
-                      return (
-                        <tr key={course.course_id}>
-                          <td>{course.course_code}</td>
-                          <td>{course.course_title}</td>
-                          <td>{course.credit_hours}</td>
-
-                          <td>
-                            Level {Math.ceil(course.term_no / 2)}
-                            /Term {course.term_no % 2 || 2}
-                          </td>
-
-                          <td>
-                            {currentEnrollment?.status ===
-                              'pending_payment' ? (
-                              <span className="badge badge-warning">
-                                Pending Payment — pay above
-                              </span>
-                            ) : currentEnrollment ? (
-                              <span className={`badge badge-${
-                                currentEnrollment.status === 'dropped'
-                                  ? 'danger'
-                                  : 'success'
-                              }`}>
-                                {currentEnrollment.status === 'enrolled'
-                                  ? 'Enrolled'
-                                  : currentEnrollment.status}
-                              </span>
-                            ) : hasPending ? (
-                              <span className="badge badge-warning">
-                                Pending approval
-                              </span>
-                            ) : (
-                              <button
-                                className="btn btn-sm btn-primary"
-                                disabled={requestingCourse !== null}
-                                onClick={() =>
-                                  handleRequestCourse(course.course_id)
-                                }
-                              >
-                                {requestingCourse === course.course_id
-                                  ? 'Sending…'
-                                  : 'Request'}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {!availableCourses.length && (
-                <p className="empty-state">
-                  Select a level to view courses
+                  No registrations yet
                 </p>
               )}
             </div>
@@ -742,54 +768,126 @@ const StudentDashboard = () => {
             <h2>My Results</h2>
 
             <div className="card">
-              {exams.length ? (
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Course</th>
-                        <th>Exam Type</th>
-                        <th>Marks</th>
-                        <th>Grade</th>
-                        <th>Date</th>
-                      </tr>
-                    </thead>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label" htmlFor="result-term">
+                    Level / Term
+                  </label>
 
-                    <tbody>
-                      {exams.map(exam => (
-                        <tr key={exam.exam_id}>
-                          <td>
-                            {exam.course_code}
-                            {' — '}
-                            {exam.course_title}
-                          </td>
+                  <select
+                    id="result-term"
+                    className="form-select"
+                    value={resultTerm}
+                    onChange={event =>
+                      setResultTerm(event.target.value)
+                    }
+                  >
+                    <option value="">Select level and term</option>
 
-                          <td>{exam.exam_type}</td>
-
-                          <td>
-                            {exam.obtained_marks ?? 'Not graded'}
-                            /{exam.total_marks}
-                          </td>
-
-                          <td>{exam.grade || '—'}</td>
-
-                          <td>
-                            {exam.exam_date
-                              ? new Date(
-                                  exam.exam_date
-                                ).toLocaleDateString()
-                              : 'N/A'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                    {TERM_OPTIONS.map(option => (
+                      <option
+                        key={option.label}
+                        value={`${option.level}-${option.term}`}
+                      >
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              ) : (
+
+                <div className="form-group">
+                  <span className="form-label">Current CGPA</span>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 600 }}>
+                    <CgpaValue
+                      value={result ? result.cgpa.value : profile?.current_cgpa}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {!resultTerm ? (
                 <p className="empty-state">
-                  No exam results yet
+                  Select a level and term to view its result.
                 </p>
-              )}
+              ) : resultLoading && !result ? (
+                <div className="spinner" />
+              ) : result && !result.published ? (
+                <div className="empty-state">
+                  <h3>Not published yet</h3>
+
+                  <p>
+                    {result.withheld
+                      ? 'Results for this term are out, but yours is not published yet because some of your marks are incomplete. Please contact your department.'
+                      : `The Level ${result.level}, Term ${result.term} result has not been published yet.`}
+                  </p>
+                </div>
+              ) : result ? (
+                <>
+                  <div className="table-container">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Course</th>
+                          <th>Credits</th>
+                          {result.components.map(component => (
+                            <th key={component.key}>
+                              {component.label} ({component.max})
+                            </th>
+                          ))}
+                          <th>Total (100)</th>
+                          <th>Grade</th>
+                          <th>Grade point</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {result.courses.map(course => (
+                          <tr key={course.course_code}>
+                            <td>
+                              {course.course_code}
+                              {' — '}
+                              {course.course_title}
+                            </td>
+
+                            <td>{Number(course.credit_hours).toFixed(2)}</td>
+
+                            {result.components.map(component => (
+                              <td key={component.key}>
+                                {Number(course[component.key])}
+                              </td>
+                            ))}
+
+                            <td>{Number(course.total)}</td>
+                            <td>{course.letter_grade}</td>
+                            <td>{Number(course.grade_point).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="stats-grid" style={{ marginTop: '1rem' }}>
+                    <div className="stat-card">
+                      <div className="stat-value">
+                        {result.gpa.toFixed(2)}
+                      </div>
+                      <div className="stat-label">
+                        Term GPA ({result.credits} credits)
+                      </div>
+                    </div>
+
+                    <div className="stat-card">
+                      <div className="stat-value">
+                        {formatCgpa(result.cgpa.value)}
+                      </div>
+                      <div className="stat-label">
+                        Current CGPA ({result.cgpa.completed_terms}
+                        {' '}completed term{result.cgpa.completed_terms === 1 ? '' : 's'})
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
         )}

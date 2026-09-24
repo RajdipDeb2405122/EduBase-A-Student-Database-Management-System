@@ -25,7 +25,9 @@ const pool = require('../config/database');
       '003_persistent_sessions',
       '004_profile_details',
       '005_course_fee_payments',
-      '006_course_teachers'
+      '006_course_teachers',
+      '007_catalog_results',
+      '008_cgpa_function_approve_procedure'
     ];
 
     for (const name of migrations) {

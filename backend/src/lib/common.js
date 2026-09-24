@@ -127,26 +127,6 @@ function number(value, label, min, max, optional = false) {
   return Math.round(n * 100) / 100;
 }
 
-function grade(marks, total) {
-  if (marks === null) return null;
-
-  const percent = 100 * Number(marks) / Number(total);
-
-  return [
-    [90, 'A+'],
-    [85, 'A'],
-    [80, 'A-'],
-    [75, 'B+'],
-    [70, 'B'],
-    [65, 'B-'],
-    [60, 'C+'],
-    [55, 'C'],
-    [50, 'C-'],
-    [40, 'D'],
-    [0, 'F']
-  ].find(([n]) => percent >= n)[1];
-}
-
 function safe(row) {
   if (!row) return row;
 
@@ -205,7 +185,6 @@ module.exports = {
   password,
   date,
   number,
-  grade,
   safe,
   log,
   errors

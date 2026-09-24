@@ -102,7 +102,7 @@ for (const [url, file] of Object.entries({
   faculty: 'faculty',
   courses: 'courses',
   enrollments: 'enrollments',
-  exams: 'exams',
+  results: 'results',
   payments: 'payments',
   scholarships: 'scholarships',
   dashboard: 'dashboard'

@@ -33,7 +33,7 @@ const Layout = () => {
             🧑‍🏫 Faculty Requests
           </NavLink>
           <NavLink to="/course-registration-requests" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-          📚 Course Requests
+          📚 Term Registrations
           </NavLink>
 
           <div className="nav-section-title">Academic</div>
@@ -46,8 +46,8 @@ const Layout = () => {
           <NavLink to="/enrollments" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             ✅ Enrollments
           </NavLink>
-          <NavLink to="/exams" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            📝 Exams
+          <NavLink to="/results" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+            📝 Results
           </NavLink>
 
           <div className="nav-section-title">Finance</div>

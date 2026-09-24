@@ -9,7 +9,9 @@
     "db:init": "node src/scripts/initDb.js",
     "db:seed": "node src/scripts/seedDb.js",
     "db:migrate": "node src/scripts/migrate.js",
-    "db:reseed": "node src/scripts/reseedDemoData.js"
+    "db:seed-catalog": "node src/scripts/seedCatalog.js",
+    "db:seed-demo": "node src/scripts/seedDemo.js",
+    "db:demo-marks": "node src/scripts/fillDemoMarks.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

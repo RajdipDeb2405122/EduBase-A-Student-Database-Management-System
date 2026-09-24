@@ -4,20 +4,21 @@ import api from '../api'
 const emptyForm = {
   course_code: '',
   course_title: '',
-  program_id: '',
+  department_id: '',
   faculty_id: '',
   credit_hours: '3.00',
-  term_no: 1,
+  level: '1',
+  term: '1',
   course_type: 'Core',
   active: true
 }
 
 const Courses = () => {
   const [courses, setCourses] = useState([])
-  const [programs, setPrograms] = useState([])
+  const [departments, setDepartments] = useState([])
   const [faculty, setFaculty] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filterProgram, setFilterProgram] = useState('')
+  const [filter, setFilter] = useState({ department_id: '', level: '', term: '' })
   const [showModal, setShowModal] = useState(false)
   const [editingCourseId, setEditingCourseId] = useState(null)
   const [formData, setFormData] = useState(emptyForm)
@@ -28,13 +29,13 @@ const Courses = () => {
 
   const loadData = async () => {
     try {
-      const [coursesRes, programsRes, facultyRes] = await Promise.all([
+      const [coursesRes, departmentsRes, facultyRes] = await Promise.all([
         api.get('/courses'),
-        api.get('/programs'),
+        api.get('/departments'),
         api.get('/faculty')
       ])
       setCourses(coursesRes.data)
-      setPrograms(programsRes.data)
+      setDepartments(departmentsRes.data)
       setFaculty(facultyRes.data)
     } catch (err) {
       console.error('Failed to load courses:', err)
@@ -54,10 +55,11 @@ const Courses = () => {
     setFormData({
       course_code: course.course_code || '',
       course_title: course.course_title || '',
-      program_id: course.program_id ?? '',
+      department_id: course.department_id ?? '',
       faculty_id: course.faculty_id ?? '',
       credit_hours: course.credit_hours ?? '3.00',
-      term_no: course.term_no ?? 1,
+      level: String(course.level ?? 1),
+      term: String(course.term ?? 1),
       course_type: course.course_type || 'Core',
       active: course.active !== false
     })
@@ -75,10 +77,11 @@ const Courses = () => {
     try {
       const payload = {
         ...formData,
-        program_id: formData.program_id ? parseInt(formData.program_id) : null,
+        department_id: formData.department_id ? parseInt(formData.department_id) : null,
         faculty_id: formData.faculty_id ? parseInt(formData.faculty_id) : null,
         credit_hours: parseFloat(formData.credit_hours),
-        term_no: parseInt(formData.term_no)
+        level: parseInt(formData.level),
+        term: parseInt(formData.term)
       }
 
       if (editingCourseId) {
@@ -106,9 +109,16 @@ const Courses = () => {
     }
   }
 
-  const filteredCourses = filterProgram
-    ? courses.filter(c => c.program_id === parseInt(filterProgram))
-    : courses
+  const filteredCourses = courses.filter(c =>
+    (!filter.department_id || c.department_id === parseInt(filter.department_id)) &&
+    (!filter.level || c.level === parseInt(filter.level)) &&
+    (!filter.term || c.term === parseInt(filter.term))
+  )
+
+  // Instructors come from the course's own department.
+  const departmentFaculty = faculty.filter(f =>
+    !formData.department_id || f.department_id === parseInt(formData.department_id)
+  )
 
   if (loading) return <div className="spinner"></div>
 
@@ -120,12 +130,23 @@ const Courses = () => {
       </div>
 
       <div className="card">
-        <div style={{ marginBottom: '1.5rem' }}>
-          <select className="form-select" style={{ maxWidth: '300px' }} value={filterProgram} onChange={(e) => setFilterProgram(e.target.value)}>
-            <option value="">All Programs</option>
-            {programs.map(p => (
-              <option key={p.program_id} value={p.program_id}>{p.program_name}</option>
+        <div className="form-row" style={{ marginBottom: '1.5rem' }}>
+          <select className="form-select" value={filter.department_id}
+            onChange={(e) => setFilter({ ...filter, department_id: e.target.value })}>
+            <option value="">All Departments</option>
+            {departments.map(d => (
+              <option key={d.department_id} value={d.department_id}>{d.department_name}</option>
             ))}
+          </select>
+          <select className="form-select" value={filter.level}
+            onChange={(e) => setFilter({ ...filter, level: e.target.value })}>
+            <option value="">All Levels</option>
+            {[1, 2, 3, 4].map(n => <option key={n} value={n}>Level {n}</option>)}
+          </select>
+          <select className="form-select" value={filter.term}
+            onChange={(e) => setFilter({ ...filter, term: e.target.value })}>
+            <option value="">All Terms</option>
+            {[1, 2].map(n => <option key={n} value={n}>Term {n}</option>)}
           </select>
         </div>
 
@@ -135,10 +156,10 @@ const Courses = () => {
               <tr>
                 <th>Code</th>
                 <th>Title</th>
-                <th>Program</th>
+                <th>Department</th>
+                <th>Level-Term</th>
                 <th>Instructor</th>
                 <th>Credits</th>
-                <th>Term</th>
                 <th>Type</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -149,10 +170,10 @@ const Courses = () => {
                 <tr key={course.course_id}>
                   <td>{course.course_code}</td>
                   <td>{course.course_title}</td>
-                  <td>{course.program_name}</td>
+                  <td>{course.department_code || course.department_name}</td>
+                  <td>{course.level}-{course.term}</td>
                   <td>{course.faculty_name || 'Not assigned'}</td>
                   <td>{course.credit_hours}</td>
-                  <td>{course.term_no}</td>
                   <td>{course.course_type}</td>
                   <td>
                     <span className={`badge badge-${course.active ? 'success' : 'secondary'}`}>
@@ -162,7 +183,9 @@ const Courses = () => {
                   <td>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <button className="btn btn-secondary btn-sm" onClick={() => openEditModal(course)}>Edit</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(course)}>Delete</button>
+                      <button className="btn btn-danger btn-sm" disabled={course.enrollment_count > 0}
+                        title={course.enrollment_count > 0 ? 'Has enrollments — mark inactive instead' : undefined}
+                        onClick={() => handleDelete(course)}>Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -186,6 +209,8 @@ const Courses = () => {
                 <div className="form-group">
                   <label className="form-label">Course Code *</label>
                   <input type="text" className="form-input" value={formData.course_code}
+                    placeholder="CSE 101" pattern="[A-Za-z]{2,5} [0-9]{3}"
+                    title='Letters, a space, then 3 digits — e.g. "CSE 101"'
                     onChange={(e) => setFormData({...formData, course_code: e.target.value})} required />
                 </div>
                 <div className="form-group">
@@ -197,12 +222,12 @@ const Courses = () => {
 
               <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">Program *</label>
-                  <select className="form-select" value={formData.program_id}
-                    onChange={(e) => setFormData({...formData, program_id: e.target.value})} required>
-                    <option value="">Select Program</option>
-                    {programs.map(p => (
-                      <option key={p.program_id} value={p.program_id}>{p.program_name}</option>
+                  <label className="form-label">Department *</label>
+                  <select className="form-select" value={formData.department_id}
+                    onChange={(e) => setFormData({...formData, department_id: e.target.value, faculty_id: ''})} required>
+                    <option value="">Select Department</option>
+                    {departments.map(d => (
+                      <option key={d.department_id} value={d.department_id}>{d.department_name}</option>
                     ))}
                   </select>
                 </div>
@@ -211,7 +236,7 @@ const Courses = () => {
                   <select className="form-select" value={formData.faculty_id}
                     onChange={(e) => setFormData({...formData, faculty_id: e.target.value})}>
                     <option value="">Select Instructor</option>
-                    {faculty.map(f => (
+                    {departmentFaculty.map(f => (
                       <option key={f.faculty_id} value={f.faculty_id}>{f.full_name}</option>
                     ))}
                   </select>
@@ -220,15 +245,27 @@ const Courses = () => {
 
               <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">Credit Hours</label>
-                  <input type="number" step="0.5" className="form-input" value={formData.credit_hours}
-                    onChange={(e) => setFormData({...formData, credit_hours: e.target.value})} />
+                  <label className="form-label">Level *</label>
+                  <select className="form-select" value={formData.level}
+                    onChange={(e) => setFormData({...formData, level: e.target.value})}>
+                    {[1, 2, 3, 4].map(n => <option key={n} value={n}>Level {n}</option>)}
+                  </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Term No</label>
-                  <input type="number" className="form-input" value={formData.term_no}
-                    onChange={(e) => setFormData({...formData, term_no: e.target.value})} />
+                  <label className="form-label">Term *</label>
+                  <select className="form-select" value={formData.term}
+                    onChange={(e) => setFormData({...formData, term: e.target.value})}>
+                    {[1, 2].map(n => <option key={n} value={n}>Term {n}</option>)}
+                  </select>
                 </div>
+                <div className="form-group">
+                  <label className="form-label">Credit Hours *</label>
+                  <input type="number" step="0.25" min="0.25" max="12" className="form-input" value={formData.credit_hours}
+                    onChange={(e) => setFormData({...formData, credit_hours: e.target.value})} required />
+                </div>
+              </div>
+
+              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Course Type</label>
                   <select className="form-select" value={formData.course_type}
@@ -239,9 +276,6 @@ const Courses = () => {
                     <option value="Lab">Lab</option>
                   </select>
                 </div>
-              </div>
-
-              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Status</label>
                   <select className="form-select" value={formData.active ? 'true' : 'false'}

@@ -1,0 +1,303 @@
+CSE Curriculum
+==============
+
+Level-1 Term-1
+--------------
+1. Structured Programming Language        (CSE 101)  - 3.00
+2. Discrete Mathematics                   (CSE 103)  - 3.00
+3. Introduction to Electrical Engineering (EEE 163) - 3.00
+4. Calculus I                            (MATH 141) - 3.00
+5. Structure of Matter, Electricity & Magnetism, Wave Mechanics
+                                         (PHY 129)  - 3.00
+
+Level-1 Term-2
+--------------
+1. Object Oriented Programming Language  (CSE 107)  - 3.00
+2. Data Structures and Algorithms I      (CSE 105)  - 3.00
+3. Chemistry                             (CHEM 113) - 3.00
+4. Linear Algebra                        (MATH 143) - 3.00
+5. Basic Mechanical Engineering          (ME 165)   - 3.00
+
+Level-2 Term-1
+--------------
+1. Digital Logic Design                  (CSE 205)  - 3.00
+2. Data Structures and Algorithms II     (CSE 207)  - 3.00
+3. Database                              (CSE 215)  - 3.00
+4. Electronic Circuits                   (EEE 263)  - 3.00
+5. Advanced Calculus                     (MATH 241) - 3.00
+
+Level-2 Term-2
+--------------
+1. Computer Architecture                 (CSE 209)  - 3.00
+2. Theory of Computation                 (CSE 211)  - 3.00
+3. Software Engineering                 (CSE 213)  - 3.00
+4. Signals and Linear Systems             (CSE 219)  - 3.00
+5. Probability and Statistics             (MATH 243) - 3.00
+
+Level-3 Term-1
+--------------
+1. Mathematics for Computing and Data Science
+                                         (CSE 301)  - 3.00
+2. Compiler                              (CSE 309)  - 3.00
+3. Operating System                      (CSE 313)  - 3.00
+4. Microprocessors, Microcontrollers, and Embedded Systems
+                                         (CSE 315)  - 3.00
+5. Artificial Intelligence               (CSE 317)  - 3.00
+
+Level-3 Term-2
+--------------
+1. Data Communication                    (CSE 311)  - 3.00
+2. Computer Networks                     (CSE 321)  - 3.00
+3. Information Systems Development and Management
+                                         (CSE 325)  - 3.00
+4. Machine Learning                      (CSE 329)  - 3.00
+5. Ethics in Society and E-Governance    (HUM 347)  - 3.00
+
+Level-4 Term-1
+--------------
+1. Numerical Analysis, Simulation and Modeling
+                                         (CSE 401)  - 3.00
+2. Cyber Security                        (CSE 405)  - 3.00
+3. Engineering Economics                 (HUM 475)  - 3.00
+4. Software Architecture                 (CSE 408)  - 3.00
+5. Deep Learning                         (CSE 410)  - 3.00
+
+Level-4 Term-2
+--------------
+1. Communication in English              (HUM 403)  - 3.00
+2. Accounting and Entrepreneurship for IT Business
+                                         (HUM 429)  - 3.00
+3. Industrial Management                 (IPE 493)  - 3.00
+4. Telecommunication Systems             (CSE 424)  - 3.00
+5. Cloud Computing                       (CSE 438)  - 3.00
+
+
+
+
+
+
+
+
+EEE Curriculum
+==============
+
+Level-1 Term-1
+--------------
+1. Electrical Circuits I                  (EEE 101)  - 3.00
+2. Calculus I                             (MATH 157) - 3.00
+3. Waves, Optics and Modern Physics       (PHY 121)  - 3.00
+4. Chemistry                              (CHEM 101) - 3.00
+5. Sociology                              (HUM 127)  - 3.00
+
+Level-1 Term-2
+--------------
+1. Electrical Circuits II                 (EEE 105)  - 3.00
+2. Calculus II                            (MATH 159) - 3.00
+3. Electricity and Magnetism              (PHY 165)  - 3.00
+4. Computer Programming                   (CSE 109)  - 3.00
+5. English                                (HUM 135)  - 3.00
+
+Level-2 Term-1
+--------------
+1. Electronic Circuits I                  (EEE 201)  - 3.00
+2. Energy Conversion I                    (EEE 203)  - 3.00
+3. Engineering Electromagnetics           (EEE 209)  - 3.00
+4. Ordinary & Partial Differential Eq.    (MATH 257) - 3.00
+5. Fundamentals of Economics              (HUM 277)  - 3.00
+
+Level-2 Term-2
+--------------
+1. Electronic Circuits II                 (EEE 207)  - 3.00
+2. Energy Conversion II                   (EEE 205)  - 3.00
+3. Continuous Signals and Linear Systems  (EEE 211)  - 3.00
+4. Linear Algebra                         (MATH 259) - 3.00
+5. Mechanical Engineering Fundamentals    (ME 267)   - 3.00
+
+Level-3 Term-1
+--------------
+1. Digital Electronics                    (EEE 303)  - 3.00
+2. Power System I                         (EEE 305)  - 3.00
+3. Electrical Properties of Materials     (EEE 307)  - 3.00
+4. Communication Systems I                (EEE 309)  - 3.00
+5. Financial and Managerial Accounting    (HUM 279)  - 3.00
+
+Level-3 Term-2
+--------------
+1. Digital Signal Processing I            (EEE 311)  - 3.00
+2. Solid State Devices                    (EEE 313)  - 3.00
+3. Power Electronics                      (EEE 315)  - 3.00
+4. Control Systems I                      (EEE 317)  - 3.00
+5. Industrial Management                  (IPE 493)  - 3.00
+
+Level-4 Term-1
+--------------
+1. Control Systems II                     (EEE 401)  - 3.00
+2. Power System II                        (EEE 411)  - 3.00
+3. Communication Systems II               (EEE 439)  - 3.00
+4. Optical Fiber Communication            (EEE 455)  - 3.00
+5. VLSI I                                 (EEE 453)  - 3.00
+
+Level-4 Term-2
+--------------
+1. Wireless Communication                 (EEE 471)  - 3.00
+2. Power Plant Engineering                (EEE 441)  - 3.00
+3. High Voltage Engineering               (EEE 445)  - 3.00
+4. Digital Signal Processing II           (EEE 473)  - 3.00
+5. Renewable Energy                       (EEE 449)  - 3.00
+
+
+
+
+
+
+
+
+
+
+
+CE Curriculum
+=============
+
+Level-1 Term-1
+--------------
+1. Analytic Mechanics                         (CE 101)   - 3.00
+2. Physical Optics, Waves and Oscillation     (PHY 101)  - 3.00
+3. Differential and Integral Calculus, Matrices
+                                               (MATH 137) - 3.00
+4. Chemistry I                                (CHEM 103) - 3.00
+5. Basic Electrical Technology                (EEE 165)  - 3.00
+
+Level-1 Term-2
+--------------
+1. Surveying                                  (CE 103)   - 3.00
+2. Differential Equations and Statistics     (MATH 139) - 3.00
+3. Structure of Matter, Electricity & Magnetism
+                                               (PHY 105)  - 3.00
+4. Chemistry II                               (CHEM 105) - 3.00
+5. English                                    (HUM 185)  - 3.00
+
+Level-2 Term-1
+--------------
+1. Engineering Materials                      (CE 201)   - 3.00
+2. Engineering Geology and Geomorphology      (CE 203)   - 3.00
+3. Mechanics of Solids I                      (CE 211)   - 3.00
+4. Laplace Transform and Vector Analysis      (MATH 237) - 3.00
+5. Sociology                                  (HUM 217)  - 3.00
+
+Level-2 Term-2
+--------------
+1. Numerical Methods                          (CE 205)   - 3.00
+2. Applied Mathematics for Engineers          (CE 207)   - 3.00
+3. Mechanics of Solids II                     (CE 213)   - 3.00
+4. Fluid Mechanics                            (WRE 211)  - 3.00
+5. Political Science                          (HUM 219)  - 3.00
+
+Level-3 Term-1
+--------------
+1. Professional Practices and Communication   (CE 301)   - 3.00
+2. Structural Analysis and Design I           (CE 311)   - 3.00
+3. Environmental Engineering I                (CE 331)   - 3.00
+4. Principles of Soil Mechanics               (CE 341)   - 3.00
+5. Transportation Engineering I               (CE 351)   - 3.00
+
+Level-3 Term-2
+--------------
+1. Design of Concrete Structures I            (CE 315)   - 3.00
+2. Design of Steel Structures                 (CE 319)   - 3.00
+3. Environmental Engineering II               (CE 333)   - 3.00
+4. Foundation Engineering                     (CE 343)   - 3.00
+5. Transportation Engineering II              (CE 353)   - 3.00
+
+Level-4 Term-1
+--------------
+1. Structural Analysis and Design II          (CE 411)   - 3.00
+2. Project Planning and Management            (CE 401)   - 3.00
+3. Hydrology, Irrigation and Flood Management (WRE 451)  - 3.00
+4. Advanced Foundation Engineering            (CE 441)   - 3.00
+5. Transportation Engineering III             (CE 451)   - 3.00
+
+Level-4 Term-2
+--------------
+1. Socio-economic Aspects of Dev. Projects    (CE 403)   - 3.00
+2. Prestressed Concrete                       (CE 415)   - 3.00
+3. Solid and Hazardous Waste Management       (CE 431)   - 3.00
+4. Earth Retaining Structures                 (CE 443)   - 3.00
+5. Transportation Engineering IV              (CE 453)   - 3.00
+
+
+
+
+
+
+
+
+
+
+
+
+ME Curriculum
+=============
+
+Level-1 Term-1
+--------------
+1. Calculus I                              (MATH 161) - 3.00
+2. Structure of Matter, Elec. & Mag.       (PHY 105)  - 3.00
+3. Chemistry I                             (CHEM 109) - 3.00
+4. Fundamentals of Electrical Engineering  (EEE 159)  - 3.00
+5. English                                 (HUM 101)  - 3.00
+
+Level-1 Term-2
+--------------
+1. Calculus II                             (MATH 163) - 3.00
+2. Waves, Optics and Wave Mechanics        (PHY 107)  - 3.00
+3. Chemistry of Engineering Materials      (CHEM 141) - 3.00
+4. Electrical and Electronics Technology   (EEE 259)  - 3.00
+5. Introduction to Mechanical Engineering  (ME 161)   - 3.00
+
+Level-2 Term-1
+--------------
+1. Vector Calculus & Laplace Transform     (MATH 261) - 3.00
+2. Engineering Thermodynamics              (ME 203)   - 3.00
+3. Engineering Mechanics                   (ME 241)   - 3.00
+4. Mechanics of Solids                     (ME 243)   - 3.00
+5. Sociology                               (HUM 211)  - 3.00
+
+Level-2 Term-2
+--------------
+1. Complex Variables and Partial Diff.     (MATH 263) - 3.00
+2. Numerical Analysis                      (ME 261)   - 3.00
+3. Metallic Materials                      (MME 291)  - 3.00
+4. Dynamics of Machinery                   (ME 245)   - 3.00
+5. Industrial Economics                    (HUM 227)  - 3.00
+
+Level-3 Term-1
+--------------
+1. Conduction and Radiation Heat Transfer  (ME 301)   - 3.00
+2. Fluid Mechanics I                       (ME 321)   - 3.00
+3. Machine Design I                        (ME 341)   - 3.00
+4. Mechanics of Machinery                  (ME 345)   - 3.00
+5. Instrumentation and Measurement         (ME 361)   - 3.00
+
+Level-3 Term-2
+--------------
+1. Convection and Mass Transfer            (ME 303)   - 3.00
+2. Fluid Mechanics II                      (ME 323)   - 3.00
+3. Machine Design II                       (ME 343)   - 3.00
+4. Applied Thermodynamics                  (ME 351)   - 3.00
+5. Production Processes                    (IPE 331)  - 3.00
+
+Level-4 Term-1
+--------------
+1. Fluid Machinery                         (ME 421)   - 3.00
+2. Refrigeration and Building Mech. Sys.   (ME 415)   - 3.00
+3. Machine Tools                           (IPE 431)  - 3.00
+4. Industrial Management                   (IPE 481)  - 3.00
+5. Internal Combustion Engines             (ME 401)   - 3.00
+
+Level-4 Term-2
+--------------
+1. Power Plant Engineering                 (ME 403)   - 3.00
+2. Automobile Engineering                  (ME 431)   - 3.00
+3. Control Engineering                     (ME 461)   - 3.00
+4. Advanced Fluid Machinery                (ME 423)   - 3.00
+5. Renewable Energy                        (ME 471)   - 3.00

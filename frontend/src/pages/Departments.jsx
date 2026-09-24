@@ -10,6 +10,7 @@ import useLiveUpdates from '../hooks/useLiveUpdates'
 
 const emptyForm = {
   department_name: '',
+  department_code: '',
   office_location: '',
   phone: ''
 }
@@ -92,6 +93,7 @@ export default function Departments() {
 
     setFormData({
       department_name: department.department_name || '',
+      department_code: department.department_code || '',
       office_location: department.office_location || '',
       phone: department.phone || ''
     })
@@ -135,6 +137,8 @@ export default function Departments() {
 
     const payload = {
       department_name: formData.department_name.trim(),
+      department_code:
+        formData.department_code.trim().toUpperCase() || null,
       office_location:
         formData.office_location.trim() || null,
       phone: formData.phone.trim() || null
@@ -233,6 +237,7 @@ export default function Departments() {
             <thead>
               <tr>
                 <th>Department Name</th>
+                <th>Code</th>
                 <th>Office Location</th>
                 <th>Phone</th>
                 <th>Actions</th>
@@ -243,6 +248,8 @@ export default function Departments() {
               {departments.map(department => (
                 <tr key={department.department_id}>
                   <td>{department.department_name}</td>
+
+                  <td>{department.department_code || '—'}</td>
 
                   <td>
                     {department.office_location || 'N/A'}
@@ -345,6 +352,22 @@ export default function Departments() {
                     onChange={change}
                     maxLength={100}
                     required
+                  />
+                </label>
+
+                <label className="form-group">
+                  <span className="form-label">
+                    Code (used by the course catalog, e.g. CSE)
+                  </span>
+
+                  <input
+                    type="text"
+                    className="form-input"
+                    name="department_code"
+                    value={formData.department_code}
+                    onChange={change}
+                    pattern="[A-Za-z]{2,10}"
+                    maxLength={10}
                   />
                 </label>
 

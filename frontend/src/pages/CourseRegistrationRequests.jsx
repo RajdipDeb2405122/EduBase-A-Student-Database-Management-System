@@ -9,6 +9,14 @@ import api from '../api'
 import useLiveUpdates from '../hooks/useLiveUpdates'
 import useViewState from '../hooks/useViewState'
 
+const outcome = registration =>
+  registration.status === 'approved'
+    ? registration.complete
+      ? 'Complete — all courses enrolled'
+      : `Approved — ${registration.active_count} of ${registration.courses.length} fees paid`
+    : registration.rejection_reason ||
+      `Reviewed by ${registration.reviewed_by_name || 'Admin'}`
+
 export default function CourseRegistrationRequests() {
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
@@ -56,7 +64,7 @@ export default function CourseRegistrationRequests() {
   useLiveUpdates(loadRequests)
 
   async function review(request, action) {
-    setBusy(request.request_id)
+    setBusy(request.registration_id)
     setError('')
     setMessage('')
 
@@ -64,20 +72,20 @@ export default function CourseRegistrationRequests() {
       const body = action === 'reject'
         ? {
             rejection_reason:
-              reasons[request.request_id]?.trim() ||
+              reasons[request.registration_id]?.trim() ||
               'No reason provided'
           }
         : {}
 
       await api.put(
-        `/course-registration/${request.request_id}/${action}`,
+        `/course-registration/${request.registration_id}/${action}`,
         body
       )
 
       setMessage(
         action === 'approve'
-          ? 'Approved. The student now sees Pending Payment and must pay the ৳1000 course fee.'
-          : 'Rejected. The student can see the decision and reason.'
+          ? 'Approved. The student now sees Pending Payment for every course and must pay each ৳1000 course fee.'
+          : 'Rejected. The student can see the decision and reason, and may submit again.'
       )
 
       await loadRequests()
@@ -96,12 +104,12 @@ export default function CourseRegistrationRequests() {
     <div>
       <div className="page-header">
         <h1 className="page-title">
-          Course Registration Requests
+          Term Registrations
         </h1>
 
         <select
           className="form-select"
-          aria-label="Request status"
+          aria-label="Registration status"
           style={{ width: 200 }}
           value={filter}
           disabled={busy !== null}
@@ -114,6 +122,11 @@ export default function CourseRegistrationRequests() {
           <option value="rejected">Rejected</option>
         </select>
       </div>
+
+      <p>
+        Each request covers every course of the student’s current
+        term. Approving creates all of the enrollments at once.
+      </p>
 
       {error && (
         <p className="badge badge-danger" role="alert">
@@ -129,7 +142,7 @@ export default function CourseRegistrationRequests() {
 
       {filter === 'pending' && (
         <p>
-          {requests.length} request(s) waiting for approval
+          {requests.length} registration(s) waiting for approval
           {' — live updates enabled.'}
         </p>
       )}
@@ -140,9 +153,9 @@ export default function CourseRegistrationRequests() {
             <tr>
               <th>Student</th>
               <th>Reg No</th>
-              <th>Course</th>
-              <th>Credits</th>
-              <th>Year/Term</th>
+              <th>Term</th>
+              <th>Courses</th>
+              <th>Year</th>
               <th>Requested</th>
               <th>Review</th>
             </tr>
@@ -150,7 +163,7 @@ export default function CourseRegistrationRequests() {
 
           <tbody>
             {requests.map(request => (
-              <tr key={request.request_id}>
+              <tr key={request.registration_id}>
                 <td>
                   {request.student_name}
                   <br />
@@ -160,16 +173,26 @@ export default function CourseRegistrationRequests() {
                 <td>{request.registration_no}</td>
 
                 <td>
-                  {request.course_code}
-                  <br />
-                  <small>{request.course_title}</small>
+                  {request.department_code}
+                  {' '}
+                  {request.level}-{request.term}
                 </td>
-
-                <td>{request.credit_hours}</td>
 
                 <td>
-                  {request.academic_year} / {request.term}
+                  {request.courses.map(course => (
+                    <div key={course.course_id}>
+                      <small>
+                        {course.course_code}
+                        {course.enrollment_status &&
+                          ` — ${course.enrollment_status === 'pending_payment'
+                            ? 'fee pending'
+                            : course.enrollment_status}`}
+                      </small>
+                    </div>
+                  ))}
                 </td>
+
+                <td>{request.academic_year}</td>
 
                 <td>
                   {new Date(
@@ -185,16 +208,16 @@ export default function CourseRegistrationRequests() {
                         placeholder="Reason if rejecting"
                         maxLength={1000}
                         aria-label={
-                          `Rejection reason for request ${request.request_id}`
+                          `Rejection reason for registration ${request.registration_id}`
                         }
                         value={
-                          reasons[request.request_id] || ''
+                          reasons[request.registration_id] || ''
                         }
                         disabled={busy !== null}
                         onChange={e =>
                           setReasons(old => ({
                             ...old,
-                            [request.request_id]:
+                            [request.registration_id]:
                               e.target.value
                           }))
                         }
@@ -207,7 +230,7 @@ export default function CourseRegistrationRequests() {
                           review(request, 'approve')
                         }
                       >
-                        Approve
+                        Approve all
                       </button>
                       {' '}
 
@@ -222,16 +245,8 @@ export default function CourseRegistrationRequests() {
                       </button>
                     </>
                   ) : (
-                    request.status === 'approved'
-  ? (
-      request.enrollment_status === 'pending_payment'
-        ? 'Pending Payment — ৳1,000'
-        : request.enrollment_status === 'enrolled'
-          ? 'Enrolled'
-          : request.enrollment_status || 'Approved'
-    )
-  : request.rejection_reason ||
-    `Reviewed by ${request.reviewed_by_name || 'Admin'}`)}
+                    outcome(request)
+                  )}
                 </td>
               </tr>
             ))}
@@ -240,7 +255,7 @@ export default function CourseRegistrationRequests() {
 
         {!requests.length && (
           <p className="empty-state">
-            No requests found
+            No registrations found
           </p>
         )}
       </div>

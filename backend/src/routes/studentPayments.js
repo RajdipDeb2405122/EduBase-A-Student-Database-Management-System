@@ -144,32 +144,6 @@ router.post(
         WHERE enrollment_id=$1
       `, [enrollmentId]);
 
-      // Include a newly paid student in already-created exams
-      // for this same course/year/term.
-      await db.query(`
-        INSERT INTO exam_result (
-          exam_id,
-          student_id,
-          enrollment_id
-        )
-        SELECT
-          x.exam_id,
-          e.student_id,
-          e.enrollment_id
-
-        FROM enrollment e
-
-        JOIN exam x
-          ON x.course_id=e.course_id
-         AND x.academic_year=e.academic_year
-         AND x.term=e.term
-
-        WHERE e.enrollment_id=$1
-
-        ON CONFLICT(exam_id,student_id)
-        DO NOTHING
-      `, [enrollmentId]);
-
       const receipt = await db.query(`
         ${coursePaymentSQL}
         WHERE cp.course_payment_id=$1

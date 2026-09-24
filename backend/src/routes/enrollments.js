@@ -11,10 +11,9 @@ const {
   log
 } = require('../lib/common');
 
-const {
-  enrollmentSQL,
-  createPendingEnrollment
-} = require('../lib/courseFees');
+const { enrollmentSQL } = require('../lib/courseFees');
+const { authorize } = require('../lib/termRegistration');
+const { termLabel } = require('../lib/academic');
 
 router.use(auth, auth.requireAdmin);
 
@@ -56,12 +55,11 @@ router.get('/:id', wrap(async (req, res) => {
   res.json(result.rows[0]);
 }));
 
+// Registers a student for every course of their current term.
 router.post('/', wrap(async (req, res) => {
   const allowed = [
     'student_id',
-    'course_id',
     'academic_year',
-    'term',
     'enrolled_on'
   ];
 
@@ -69,11 +67,11 @@ router.post('/', wrap(async (req, res) => {
     Object.keys(req.body).every(
       key => allowed.includes(key)
     ),
-    'Do not supply status or payment fields'
+    'Only student, academic year and date can be supplied'
   );
 
   const result = await transaction(async db => {
-    const enrollment = await createPendingEnrollment(
+    const { registration, courses, student } = await authorize(
       db,
       req.body,
       req.admin.admin_id
@@ -82,18 +80,25 @@ router.post('/', wrap(async (req, res) => {
     await log(
       db,
       req.admin.admin_id,
-      'enrollment',
-      enrollment.enrollment_id,
+      'term_registration',
+      registration.registration_id,
       'AUTHORIZE',
-      'Course authorized; awaiting student course-fee payment'
+      `Registered ${student.registration_no} for term ` +
+        `${termLabel(registration.level, registration.term)}; ` +
+        'awaiting student course-fee payments'
     );
 
-    const record = await db.query(`
+    const records = await db.query(`
       ${enrollmentSQL}
-      WHERE e.enrollment_id=$1
-    `, [enrollment.enrollment_id]);
+      WHERE e.registration_id=$1
+      ORDER BY c.course_code
+    `, [registration.registration_id]);
 
-    return record.rows[0];
+    return {
+      registration,
+      courses: courses.length,
+      enrollments: records.rows
+    };
   });
 
   res.status(201).json(result);
@@ -130,6 +135,17 @@ router.put('/:id', wrap(async (req, res) => {
     );
 
     const old = found.rows[0];
+
+    const published = await db.query(
+      'SELECT 1 FROM course_result WHERE enrollment_id=$1',
+      [old.enrollment_id]
+    );
+
+    check(
+      !published.rowCount,
+      'The result for this enrollment is published; its status is final',
+      409
+    );
 
     check(
       !(
@@ -180,82 +196,6 @@ router.put('/:id', wrap(async (req, res) => {
   });
 
   res.json(result);
-}));
-
-router.delete('/:id', wrap(async (req, res) => {
-  await transaction(async db => {
-    const found = await db.query(`
-      SELECT *
-      FROM enrollment
-      WHERE enrollment_id=$1
-      FOR UPDATE
-    `, [id(req.params.id)]);
-
-    check(
-      found.rowCount,
-      'Enrollment not found',
-      404
-    );
-
-    const old = found.rows[0];
-
-    const used = await db.query(`
-      SELECT 1
-      FROM course_payment
-      WHERE enrollment_id=$1
-
-      UNION ALL
-
-      SELECT 1
-      FROM exam_result
-      WHERE enrollment_id=$1
-    `, [old.enrollment_id]);
-
-    check(
-      !used.rowCount,
-      'Enrollments with payments or exam results cannot be deleted. Use an appropriate status instead.',
-      409
-    );
-
-    const approved = await db.query(`
-      SELECT 1
-      FROM course_registration_requests
-      WHERE student_id=$1
-        AND course_id=$2
-        AND academic_year=$3
-        AND term=$4
-        AND status='approved'
-    `, [
-      old.student_id,
-      old.course_id,
-      old.academic_year,
-      old.term
-    ]);
-
-    check(
-      !approved.rowCount,
-      'An approved course request must be retained. Set the enrollment to dropped instead.',
-      409
-    );
-
-    await db.query(
-      'DELETE FROM enrollment WHERE enrollment_id=$1',
-      [old.enrollment_id]
-    );
-
-    await log(
-      db,
-      req.admin.admin_id,
-      'enrollment',
-      old.enrollment_id,
-      'DELETE',
-      'Deleted unused enrollment authorization'
-    );
-  });
-
-  res.json({
-    message: 'Enrollment deleted'
-  });
 }));
 
 module.exports = router;

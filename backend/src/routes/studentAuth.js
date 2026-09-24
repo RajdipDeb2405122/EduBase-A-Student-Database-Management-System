@@ -5,8 +5,12 @@ const auth = require('../middleware/auth');
 const {
   wrap,
   check,
-  id
+  transaction
 } = require('../lib/common');
+
+const academic = require('../lib/academic');
+const { registrationSQL } = require('../lib/termRegistration');
+const { studentResult } = require('../lib/results');
 
 const { login } = require('../lib/login');
 const { register } = require('../lib/registration');
@@ -53,8 +57,14 @@ router.get('/me/:id', wrap(async (req, res) => {
       p.program_name,
       p.degree_level,
       d.department_name,
+      d.department_code,
       f.full_name AS advisor_name,
-      f.email AS advisor_email
+      f.email AS advisor_email,
+      (
+        SELECT count(*)::int
+        FROM term_result tr
+        WHERE tr.student_id=s.student_id
+      ) AS completed_terms
 
     FROM student s
 
@@ -83,62 +93,10 @@ const queries = {
     ORDER BY e.academic_year DESC,e.term
   `,
 
-  'course-requests': `
-    SELECT
-      r.*,
-      c.course_code,
-      c.course_title,
-      c.credit_hours,
-      a.full_name AS reviewed_by_name,
-      e.enrollment_id,
-      e.status AS enrollment_status,
-      e.fee_required,
-      cp.course_payment_id,
-      cp.receipt_no
-
-    FROM course_registration_requests r
-
-    JOIN course c
-      ON c.course_id=r.course_id
-
-    LEFT JOIN admin_public a
-      ON a.admin_id=r.reviewed_by_admin_id
-
-    LEFT JOIN enrollment e
-      ON e.student_id=r.student_id
-     AND e.course_id=r.course_id
-     AND e.academic_year=r.academic_year
-     AND e.term=r.term
-
-    LEFT JOIN course_payment cp
-      ON cp.enrollment_id=e.enrollment_id
-
+  registrations: `
+    ${registrationSQL}
     WHERE r.student_id=$1
     ORDER BY r.requested_on DESC
-  `,
-
-  exams: `
-    SELECT
-      x.*,
-      r.result_id,
-      r.obtained_marks,
-      r.grade,
-      r.remarks,
-      c.course_code,
-      c.course_title
-
-    FROM exam_result r
-
-    JOIN exam x
-      ON x.exam_id=r.exam_id
-
-    JOIN course c
-      ON c.course_id=x.course_id
-
-    WHERE r.student_id=$1
-      AND x.published=TRUE
-
-    ORDER BY x.exam_date DESC NULLS LAST,x.exam_id DESC
   `,
 
   scholarships: `
@@ -210,89 +168,89 @@ router.post(
 
     check(offer, 'Select one of the available scholarships', 400);
 
-    const existing = await pool.query(`
-      SELECT status
-      FROM scholarship_application
-      WHERE student_id=$1
-        AND scholarship_name=$2
-        AND status IN ('pending', 'approved')
-    `, [req.user.student_id, offer.scholarship_name]);
+    const result = await transaction(async db => {
+      const existing = await db.query(`
+        SELECT status
+        FROM scholarship_application
+        WHERE student_id=$1
+          AND scholarship_name=$2
+          AND status IN ('pending', 'approved')
+      `, [req.user.student_id, offer.scholarship_name]);
 
-    check(
-      !existing.rowCount,
+      check(
+        !existing.rowCount,
 
-      existing.rows[0]?.status === 'approved'
-        ? 'You have already been awarded this scholarship'
-        : 'Your application for this scholarship is awaiting admin review',
+        existing.rows[0]?.status === 'approved'
+          ? 'You have already been awarded this scholarship'
+          : 'Your application for this scholarship is awaiting admin review',
 
-      409
-    );
+        409
+      );
 
-    const result = await pool.query(`
-      INSERT INTO scholarship_application (
-        student_id, scholarship_name, award_type, amount
-      )
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `, [
-      req.user.student_id,
-      offer.scholarship_name,
-      offer.award_type,
-      offer.amount
-    ]);
+      return db.query(`
+        INSERT INTO scholarship_application (
+          student_id, scholarship_name, award_type, amount
+        )
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+      `, [
+        req.user.student_id,
+        offer.scholarship_name,
+        offer.award_type,
+        offer.amount
+      ]);
+    });
 
     res.status(201).json(result.rows[0]);
   })
 );
 
+// The only courses a student may see or register: their own
+// department's current level + term.
 router.get('/courses/:studentId', wrap(async (req, res) => {
-  const level = req.query.level
-    ? id(req.query.level, 'level')
-    : null;
+  const s = await academic.standing(pool, req.user.student_id);
 
-  const term = req.query.term
-    ? id(req.query.term, 'term')
-    : null;
-
-  check(
-    !level || level <= 4,
-    'Level must be between 1 and 4'
+  const courses = await academic.termCourses(
+    pool,
+    s.department_id,
+    s.current_level,
+    s.current_term
   );
 
-  check(
-    !term || term <= 2,
-    'Term must be between 1 and 2'
-  );
-
-  const result = await pool.query(`
-    SELECT c.*,p.program_name
-    FROM course c
-
-    JOIN program p
-      ON p.program_id=c.program_id
-
-    JOIN student s
-      ON s.program_id=c.program_id
-
-    WHERE s.student_id=$1
-      AND c.active=TRUE
-      AND (
-        $2::int IS NULL
-        OR c.term_no BETWEEN 2*$2-1 AND 2*$2
-      )
-      AND (
-        $3::int IS NULL
-        OR ((c.term_no-1)%2)+1=$3
-      )
-
-    ORDER BY c.course_code
+  const registration = await pool.query(`
+    ${registrationSQL}
+    WHERE r.student_id=$1
+      AND r.level=$2
+      AND r.term=$3
+    ORDER BY r.requested_on DESC
+    LIMIT 1
   `, [
     req.user.student_id,
-    level,
-    term
+    s.current_level,
+    s.current_term
   ]);
 
-  res.json(result.rows);
+  res.json({
+    department_code: s.department_code,
+    department_name: s.department_name,
+    level: s.current_level,
+    term: s.current_term,
+    required: academic.COURSES_PER_TERM,
+    courses,
+    registration: registration.rows[0] || null
+  });
+}));
+
+// Published result of one level + term, or "not published".
+router.get('/me/:id/results', wrap(async (req, res) => {
+  res.json(
+    await studentResult(
+      pool,
+      await academic.standing(pool, req.user.student_id),
+      academic.level(req.query.level),
+      academic.term(req.query.term)
+    )
+  );
 }));
 
 module.exports = router;

@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const pool = require('../config/database');
-const { wrap, check } = require('../lib/common');
+const { wrap, check, transaction } = require('../lib/common');
 
 const query = `
   SELECT
@@ -86,12 +86,12 @@ async function createSession(db, user) {
 async function revokeSession(token) {
   if (!validToken(token)) return;
 
-  await pool.query(`
+  await transaction(db => db.query(`
     UPDATE login_session
     SET revoked_at=CURRENT_TIMESTAMP
     WHERE token_hash=$1
       AND revoked_at IS NULL
-  `, [hashToken(token)]);
+  `, [hashToken(token)]));
 }
 
 const auth = wrap(async (req, res, next) => {

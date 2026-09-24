@@ -269,11 +269,11 @@ function requests(role) {
   }));
 
   router.delete('/:id', wrap(async (req, res) => {
-    const r = await pool.query(`
+    const r = await transaction(db => db.query(`
       DELETE FROM ${t}
       WHERE request_id=$1
       RETURNING request_id
-    `, [id(req.params.id)]);
+    `, [id(req.params.id)]));
 
     check(r.rowCount, 'Request not found', 404);
     res.json({ message: 'Request deleted' });

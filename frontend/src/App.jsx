@@ -20,7 +20,7 @@ import Students from './pages/Students'
 import StudentDetail from './pages/StudentDetail'
 import Courses from './pages/Courses'
 import Enrollments from './pages/Enrollments'
-import Exams from './pages/Exams'
+import Results from './pages/Results'
 import Payments from './pages/Payments'
 import Scholarships from './pages/Scholarships'
 import Faculty from './pages/Faculty'
@@ -128,7 +128,7 @@ export default function App() {
             <Route path="students/:id" element={<StudentDetail />} />
             <Route path="courses" element={<Courses />} />
             <Route path="enrollments" element={<Enrollments />} />
-            <Route path="exams" element={<Exams />} />
+            <Route path="results" element={<Results />} />
             <Route path="payments" element={<Payments />} />
             <Route path="scholarships" element={<Scholarships />} />
             <Route path="faculty" element={<Faculty />} />

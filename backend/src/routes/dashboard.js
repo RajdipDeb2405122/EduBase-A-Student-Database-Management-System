@@ -90,6 +90,7 @@ router.get('/cgpa-distribution', async (req, res) => {
     const result = await pool.query(`
       SELECT 
         CASE 
+          WHEN current_cgpa IS NULL THEN 'No completed term'
           WHEN current_cgpa >= 3.75 THEN 'A+ / A'
           WHEN current_cgpa >= 3.50 THEN 'A-'
           WHEN current_cgpa >= 3.25 THEN 'B+'

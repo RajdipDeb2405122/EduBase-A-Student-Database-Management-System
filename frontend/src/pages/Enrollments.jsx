@@ -13,9 +13,7 @@ const year = () =>
 
 const freshForm = () => ({
   student_id: '',
-  course_id: '',
   academic_year: year(),
-  term: 'Fall',
   enrolled_on: new Date().toISOString().slice(0, 10)
 })
 
@@ -85,7 +83,7 @@ export default function Enrollments() {
       setForm(freshForm())
 
       setMessage(
-        'Course authorized. The student must pay the ৳1000 course fee before becoming enrolled.'
+        'Term registered. The student must pay the ৳1000 fee for each course before becoming enrolled.'
       )
 
       await load()
@@ -119,6 +117,15 @@ export default function Enrollments() {
       student.student_id === Number(form.student_id)
   )
 
+  const termCourses = selectedStudent
+    ? courses.filter(course =>
+        course.active &&
+        course.department_id === selectedStudent.department_id &&
+        course.level === selectedStudent.current_level &&
+        course.term === selectedStudent.current_term
+      )
+    : []
+
   return (
     <div>
       <div className="page-header">
@@ -132,14 +139,14 @@ export default function Enrollments() {
             setShowModal(true)
           }}
         >
-          Authorize course
+          Register student for term
         </button>
       </div>
 
       <p>
-        New approvals remain Pending Payment until the student
-        pays. Historical enrollments are preserved without a
-        new fee.
+        A student is registered for every course of their
+        current term at once. Each enrollment stays Pending
+        Payment until the student pays its course fee.
       </p>
 
       {error && (
@@ -250,15 +257,16 @@ export default function Enrollments() {
           >
             <div className="modal-header">
               <h2 className="modal-title">
-                Authorize course — payment required
+                Register for current term — payment required
               </h2>
             </div>
 
             <form onSubmit={authorize}>
               <div className="modal-body">
                 <p>
-                  This does not create a payment or bypass
-                  the student’s fee.
+                  Registers the student for all courses of their
+                  current level and term. This does not create a
+                  payment or bypass the student’s fees.
                 </p>
 
                 <label className="form-group">
@@ -271,8 +279,7 @@ export default function Enrollments() {
                     onChange={event =>
                       setForm(old => ({
                         ...old,
-                        student_id: event.target.value,
-                        course_id: ''
+                        student_id: event.target.value
                       }))
                     }
                   >
@@ -295,40 +302,25 @@ export default function Enrollments() {
                   </select>
                 </label>
 
-                <label className="form-group">
-                  Course
+                {selectedStudent && (
+                  <div className="form-group">
+                    <strong>
+                      Level {selectedStudent.current_level},
+                      {' '}Term {selectedStudent.current_term}
+                      {' '}courses ({termCourses.length})
+                    </strong>
 
-                  <select
-                    className="form-select"
-                    required
-                    value={form.course_id}
-                    onChange={event =>
-                      setForm(old => ({
-                        ...old,
-                        course_id: event.target.value
-                      }))
-                    }
-                  >
-                    <option value="">Select course</option>
-
-                    {courses
-                      .filter(course =>
-                        course.active &&
-                        course.program_id ===
-                          selectedStudent?.program_id
-                      )
-                      .map(course => (
-                        <option
-                          key={course.course_id}
-                          value={course.course_id}
-                        >
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                      {termCourses.map(course => (
+                        <li key={course.course_id}>
                           {course.course_code}
                           {' — '}
                           {course.course_title}
-                        </option>
+                        </li>
                       ))}
-                  </select>
-                </label>
+                    </ul>
+                  </div>
+                )}
 
                 <label className="form-group">
                   Academic year
@@ -345,25 +337,6 @@ export default function Enrollments() {
                       }))
                     }
                   />
-                </label>
-
-                <label className="form-group">
-                  Term
-
-                  <select
-                    className="form-select"
-                    value={form.term}
-                    onChange={event =>
-                      setForm(old => ({
-                        ...old,
-                        term: event.target.value
-                      }))
-                    }
-                  >
-                    {['Fall', 'Spring', 'Summer'].map(term => (
-                      <option key={term}>{term}</option>
-                    ))}
-                  </select>
                 </label>
 
                 <label className="form-group">
@@ -399,7 +372,7 @@ export default function Enrollments() {
                 >
                   {busy
                     ? 'Saving…'
-                    : 'Authorize — student must pay'}
+                    : 'Register — student must pay'}
                 </button>
               </div>
             </form>

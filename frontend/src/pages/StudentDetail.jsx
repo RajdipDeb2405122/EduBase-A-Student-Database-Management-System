@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import api from '../api'
+import CgpaValue from '../components/CgpaValue'
 
 const StudentDetail = () => {
   const { id } = useParams()
@@ -9,6 +10,9 @@ const StudentDetail = () => {
   const [payments, setPayments] = useState([])
   const [scholarships, setScholarships] = useState([])
   const [loading, setLoading] = useState(true)
+  const [standing, setStanding] = useState({ current_level: '1', current_term: '1' })
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     loadData()
@@ -23,6 +27,10 @@ const StudentDetail = () => {
         api.get(`/students/${id}/scholarships`)
       ])
       setStudent(studentRes.data)
+      setStanding({
+        current_level: String(studentRes.data.current_level),
+        current_term: String(studentRes.data.current_term)
+      })
       setEnrollments(enrollRes.data)
       setPayments(payRes.data)
       setScholarships(schRes.data)
@@ -30,6 +38,25 @@ const StudentDetail = () => {
       console.error('Failed to load student:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // The level/term decides which courses the student may register.
+  const saveStanding = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    setNotice('')
+    try {
+      const { data } = await api.put(`/students/${id}`, {
+        current_level: Number(standing.current_level),
+        current_term: Number(standing.current_term)
+      })
+      setStudent(old => ({ ...old, ...data }))
+      setNotice('Current level and term updated.')
+    } catch (err) {
+      setNotice(err.message)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -59,13 +86,36 @@ const StudentDetail = () => {
         <div className="form-row">
           <div><strong>Program:</strong> {student.program_name} ({student.degree_level})</div>
           <div><strong>Advisor:</strong> {student.advisor_name || 'Not assigned'}</div>
-          <div><strong>CGPA:</strong> {parseFloat(student.current_cgpa).toFixed(2)}</div>
+          <div><strong>CGPA:</strong> <CgpaValue value={student.current_cgpa} /></div>
         </div>
         <div className="form-row">
           <div><strong>Date of Birth:</strong> {student.date_of_birth ? new Date(student.date_of_birth).toLocaleDateString() : 'N/A'}</div>
           <div><strong>Admission Date:</strong> {new Date(student.admission_date).toLocaleDateString()}</div>
           <div><strong>Verified By:</strong> {student.verified_by_name || 'System'}</div>
         </div>
+
+        <form className="form-row" style={{ alignItems: 'flex-end' }} onSubmit={saveStanding}>
+          <div className="form-group">
+            <label className="form-label">Current Level</label>
+            <select className="form-select" value={standing.current_level}
+              onChange={(e) => setStanding({ ...standing, current_level: e.target.value })}>
+              {[1, 2, 3, 4].map(n => <option key={n} value={n}>Level {n}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Current Term</label>
+            <select className="form-select" value={standing.current_term}
+              onChange={(e) => setStanding({ ...standing, current_term: e.target.value })}>
+              {[1, 2].map(n => <option key={n} value={n}>Term {n}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <button className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : 'Update level / term'}
+            </button>
+            {notice && <div><small>{notice}</small></div>}
+          </div>
+        </form>
       </div>
 
       <div className="form-row">

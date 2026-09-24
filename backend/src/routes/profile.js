@@ -263,10 +263,10 @@ router.put('/photo', upload, wrap(async (req, res) => {
   const dataUrl =
     `data:image/jpeg;base64,${output.toString('base64')}`;
 
-  await pool.query(
+  await transaction(db => db.query(
     'UPDATE users SET profile_photo=$1 WHERE user_id=$2',
     [dataUrl, req.user.user_id]
-  );
+  ));
 
   res.json(
     await getProfile(pool, req.user.user_id)
@@ -274,10 +274,10 @@ router.put('/photo', upload, wrap(async (req, res) => {
 }));
 
 router.delete('/photo', wrap(async (req, res) => {
-  await pool.query(
+  await transaction(db => db.query(
     'UPDATE users SET profile_photo=NULL WHERE user_id=$1',
     [req.user.user_id]
-  );
+  ));
 
   res.json(
     await getProfile(pool, req.user.user_id)

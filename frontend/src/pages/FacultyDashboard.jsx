@@ -12,12 +12,19 @@ import useLiveUpdates from '../hooks/useLiveUpdates'
 import useViewState from '../hooks/useViewState'
 import ProfileEditor from '../components/ProfileEditor'
 import ProfileAvatar from '../components/ProfileAvatar'
+import CgpaValue from '../components/CgpaValue'
 
-const calendarDate = value =>
-  value ? String(value).slice(0, 10) : 'Not scheduled'
+const termOf = course => `Level ${course.level}, Term ${course.term}`
 
-const marksText = row =>
-  `${row.obtained_marks ?? 'Not graded'} / ${row.total_marks}`
+const blank = value =>
+  value === null || value === undefined ? '' : String(Number(value))
+
+// Client-side hint only; the server validates every value.
+function invalidValue(value, max) {
+  if (value === '') return false
+  if (!/^\d+(\.\d{1,2})?$/.test(value)) return true
+  return Number(value) > max
+}
 
 export default function FacultyDashboard() {
   const { logout } = useAuth()
@@ -39,69 +46,51 @@ export default function FacultyDashboard() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [roster, setRoster] = useState(null)
+  const [sheet, setSheet] = useState(null)
   const [drafts, setDrafts] = useState({})
   const [progress, setProgress] = useState(null)
-  const [publishRequests, setPublishRequests] = useState([])
-
-  const year = new Date().getFullYear()
-
-  const [exam, setExam] = useState({
-    course_id: '',
-    academic_year: `${year}-${year + 1}`,
-    term: 'Fall',
-    exam_type: 'Midterm',
-    exam_date: '',
-    total_marks: '100'
-  })
 
   const dirtyRows = useRef(new Set())
   const busyRef = useRef(false)
-  const rosterId = useRef(null)
+  const sheetId = useRef(null)
   const progressId = useRef(null)
   const dataVersion = useRef(0)
-  const rosterVersion = useRef(0)
+  const sheetVersion = useRef(0)
 
-  const loadRoster = useCallback(
-    async (examId, automatic = false) => {
-      if (
-        automatic &&
-        rosterId.current !== examId
-      ) {
+  const loadSheet = useCallback(
+    async (courseId, automatic = false) => {
+      if (automatic && sheetId.current !== courseId) {
         return
       }
 
-      if (
-        !automatic &&
-        rosterId.current !== examId
-      ) {
+      if (!automatic && sheetId.current !== courseId) {
         if (
           dirtyRows.current.size &&
           !window.confirm(
-            'Discard unsaved marks and open another exam?'
+            'Discard unsaved marks and open another course?'
           )
         ) {
           return
         }
 
         dirtyRows.current.clear()
-        rosterId.current = examId
+        sheetId.current = courseId
       }
 
-      const version = ++rosterVersion.current
+      const version = ++sheetVersion.current
 
       const { data: next } = await api.get(
-        `/faculty-portal/exams/${examId}/roster`
+        `/faculty-portal/courses/${courseId}/marks`
       )
 
       if (
-        version !== rosterVersion.current ||
-        rosterId.current !== examId
+        version !== sheetVersion.current ||
+        sheetId.current !== courseId
       ) {
         return
       }
 
-      setRoster(next)
+      setSheet(next)
 
       setDrafts(old =>
         Object.fromEntries(
@@ -111,11 +100,12 @@ export default function FacultyDashboard() {
             dirtyRows.current.has(student.enrollment_id) &&
             old[student.enrollment_id]
               ? old[student.enrollment_id]
-              : {
-                  obtained_marks:
-                    student.obtained_marks ?? '',
-                  remarks: student.remarks || ''
-                }
+              : Object.fromEntries(
+                  next.components.map(component => [
+                    component.key,
+                    blank(student[component.key])
+                  ])
+                )
           ])
         )
       )
@@ -138,10 +128,9 @@ export default function FacultyDashboard() {
   const refresh = useCallback(async () => {
     const version = ++dataVersion.current
 
-    const [dashboard, personal, requests] = await Promise.all([
+    const [dashboard, personal] = await Promise.all([
       api.get('/faculty-portal/dashboard'),
-      api.get('/profile/me', { role: 'faculty' }),
-      api.get('/faculty-portal/publish-requests')
+      api.get('/profile/me', { role: 'faculty' })
     ])
 
     if (version !== dataVersion.current) return
@@ -154,22 +143,21 @@ export default function FacultyDashboard() {
       }
     }
 
-    setPublishRequests(requests.data)
     setData(next)
 
-    const selectedExam = rosterId.current
+    const selectedCourse = sheetId.current
 
-    if (selectedExam !== null) {
+    if (selectedCourse !== null) {
       if (
-        next.exams.some(item =>
-          item.exam_id === selectedExam
+        next.courses.some(item =>
+          item.course_id === selectedCourse && item.is_mine
         )
       ) {
-        await loadRoster(selectedExam, true)
+        await loadSheet(selectedCourse, true)
       } else {
-        rosterId.current = null
+        sheetId.current = null
         dirtyRows.current.clear()
-        setRoster(null)
+        setSheet(null)
       }
     }
 
@@ -193,7 +181,7 @@ export default function FacultyDashboard() {
         setProgress(null)
       }
     }
-  }, [loadRoster])
+  }, [loadSheet])
 
   useEffect(() => {
     refresh().catch(e => setError(e.message))
@@ -223,7 +211,7 @@ export default function FacultyDashboard() {
   async function act(fn) {
     busyRef.current = true
     dataVersion.current++
-    rosterVersion.current++
+    sheetVersion.current++
 
     setBusy(true)
     setError('')
@@ -269,105 +257,54 @@ export default function FacultyDashboard() {
     course => !course.is_mine
   )
 
-  const upcoming = data.exams
-    .filter(item =>
-      item.exam_date &&
-      String(item.exam_date).slice(0, 10) >=
-        new Date().toISOString().slice(0, 10)
-    )
-    .sort((a, b) =>
-      String(a.exam_date).localeCompare(
-        String(b.exam_date)
-      )
-    )
+  const pendingMarks = mine.reduce(
+    (sum, course) =>
+      sum + course.student_count - course.marked_count,
+    0
+  )
 
-  const editExam = event => {
-    setExam(old => ({
-      ...old,
-      [event.target.name]: event.target.value
-    }))
-  }
+  // Saves every edited row; untouched rows and blank boxes are
+  // left as they are, so partial progress is fine.
+  const saveMarks = () => {
+    if (!sheet) return
 
-  const awaitingAdmin = examId =>
-    publishRequests.some(
-      request =>
-        request.exam_id === examId &&
-        request.status === 'pending'
-    )
-
-  // Course info for the exam currently open in the Marks section.
-  const openExamMeta = roster
-    ? data.exams.find(
-        item => item.exam_id === roster.exam.exam_id
-      )
-    : null
-
-  // Save every edited row of the open exam's Marks table.
-  const saveAllMarks = () => {
-    if (!roster?.exam.can_edit) return
-
-    setMessage('')
-
-    act(async () => {
-      let saved = 0
-
-      for (const enrollmentId of [...dirtyRows.current]) {
-        const student = roster.students.find(
+    const rows = [...dirtyRows.current]
+      .map(enrollmentId => {
+        const student = sheet.students.find(
           row => row.enrollment_id === enrollmentId
         )
 
-        if (
-          !student ||
-          !['enrolled', 'completed'].includes(student.status)
-        ) {
-          continue
+        if (!student || student.locked) return null
+
+        return {
+          enrollment_id: enrollmentId,
+          registration_no: student.registration_no,
+          ...drafts[enrollmentId]
         }
-
-        const row = drafts[enrollmentId] || {}
-
-        await api.put(
-          `/faculty-portal/exams/${roster.exam.exam_id}/results/${enrollmentId}`,
-          {
-            obtained_marks:
-              row.obtained_marks === ''
-                ? null
-                : row.obtained_marks,
-
-            remarks: row.remarks
-          }
-        )
-
-        dirtyRows.current.delete(enrollmentId)
-        saved++
-      }
-
-      setMessage(
-        saved
-          ? `Marks saved for ${saved} student(s).`
-          : 'No unsaved marks to save.'
-      )
-    })
-  }
-
-  // Request publication for the ENTIRE exam. After the admin
-  // accepts, every student's result is published together and
-  // blank marks are recorded as 0.
-  const requestPublish = () => {
-    if (!roster) return
+      })
+      .filter(Boolean)
 
     setMessage('')
 
+    if (!rows.length) {
+      setMessage('No unsaved marks to save.')
+      return
+    }
+
     act(async () => {
-      await api.post(
-        `/faculty-portal/exams/${roster.exam.exam_id}/publish-requests`,
-        {}
+      const { data: saved } = await api.put(
+        `/faculty-portal/courses/${sheet.course.course_id}/marks`,
+        { marks: rows }
       )
 
-      setMessage(
-        'Publish request sent to the administrator. All students’ marks will publish together after approval.'
-      )
+      dirtyRows.current.clear()
+      setSheet(saved)
+
+      setMessage(`Marks saved for ${saved.saved} student(s).`)
     })
   }
+
+  const unsaved = dirtyRows.current.size
 
   return (
     <div style={{
@@ -429,7 +366,7 @@ export default function FacultyDashboard() {
           'overview',
           'courses',
           'students',
-          'exams',
+          'marks',
           'profile'
         ].map(name => (
           <button
@@ -479,35 +416,14 @@ export default function FacultyDashboard() {
             {[
               ['My courses', mine.length],
               ['Students under supervision', data.students.length],
-              ['My exams', data.exams.length],
-              [
-                'Pending publish requests',
-                publishRequests.filter(
-                  item => item.status === 'pending'
-                ).length
-              ]
+              ['Students with complete marks', mine.reduce((sum, course) => sum + course.marked_count, 0)],
+              ['Marks still to enter', pendingMarks]
             ].map(([label, value]) => (
               <div className="stat-card" key={label}>
                 <div className="stat-value">{value}</div>
                 <div className="stat-label">{label}</div>
               </div>
             ))}
-          </div>
-
-          <div className="card">
-            <h2>Upcoming exams</h2>
-
-            {upcoming.length ? upcoming.map(item => (
-              <p key={item.exam_id}>
-                {calendarDate(item.exam_date)}
-                {' · '}
-                {item.course_code}
-                {' · '}
-                {item.exam_type}
-              </p>
-            )) : (
-              <p>No upcoming exams.</p>
-            )}
           </div>
 
           <div className="card">
@@ -528,7 +444,7 @@ export default function FacultyDashboard() {
 
             <p>
               Removing an assignment does not delete the
-              course, students, exams or results.
+              course, students, marks or results.
             </p>
 
             <div className="table-container">
@@ -536,8 +452,9 @@ export default function FacultyDashboard() {
                 <thead>
                   <tr>
                     <th>Course</th>
+                    <th>Term</th>
                     <th>Credits</th>
-                    <th>Program</th>
+                    <th>Marks entered</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -552,10 +469,29 @@ export default function FacultyDashboard() {
                         {!course.active && ' (inactive)'}
                       </td>
 
+                      <td>
+                        {course.department_code} {termOf(course)}
+                      </td>
+
                       <td>{course.credit_hours}</td>
-                      <td>{course.program_name}</td>
 
                       <td>
+                        {course.marked_count} / {course.student_count}
+                      </td>
+
+                      <td>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          disabled={busy}
+                          onClick={() => {
+                            setTab('marks')
+                            act(() => loadSheet(course.course_id))
+                          }}
+                        >
+                          Enter marks
+                        </button>
+                        {' '}
+
                         <button
                           className="btn btn-sm btn-danger"
                           disabled={busy}
@@ -597,7 +533,7 @@ export default function FacultyDashboard() {
                 <thead>
                   <tr>
                     <th>Course</th>
-                    <th>Program</th>
+                    <th>Term</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -611,7 +547,7 @@ export default function FacultyDashboard() {
                         {course.course_title}
                       </td>
 
-                      <td>{course.program_name}</td>
+                      <td>{termOf(course)}</td>
 
                       <td>
                         <button
@@ -652,6 +588,7 @@ export default function FacultyDashboard() {
                   <th>Registration</th>
                   <th>Name</th>
                   <th>Program</th>
+                  <th>Term</th>
                   <th>CGPA</th>
                   <th>Relationship</th>
                   <th>Progress</th>
@@ -666,7 +603,14 @@ export default function FacultyDashboard() {
                     <td>{student.program_name}</td>
 
                     <td>
-                      {Number(student.current_cgpa).toFixed(2)}
+                      {student.current_level}-{student.current_term}
+                    </td>
+
+                    <td>
+                      <CgpaValue
+                        value={student.current_cgpa}
+                        note={false}
+                      />
                     </td>
 
                     <td>
@@ -704,15 +648,12 @@ export default function FacultyDashboard() {
               </h2>
 
               <p>
-                Stored CGPA:
+                CGPA:
                 {' '}
-                {Number(
-                  progress.student.current_cgpa
-                ).toFixed(2)}.
+                <CgpaValue value={progress.student.current_cgpa} />.
                 {' '}
                 Course-student access is limited to your courses;
-                advisors can see published academic results
-                across courses.
+                advisors can see every course.
               </p>
 
               <div className="table-container">
@@ -722,6 +663,11 @@ export default function FacultyDashboard() {
                       <th>Course</th>
                       <th>Year / term</th>
                       <th>Enrollment</th>
+                      {progress.components.map(component => (
+                        <th key={component.key}>{component.label}</th>
+                      ))}
+                      <th>Total</th>
+                      <th>Grade</th>
                     </tr>
                   </thead>
 
@@ -741,271 +687,86 @@ export default function FacultyDashboard() {
                         </td>
 
                         <td>{enrollment.status}</td>
+
+                        {progress.components.map(component => (
+                          <td key={component.key}>
+                            {blank(enrollment[component.key]) || '—'}
+                          </td>
+                        ))}
+
+                        <td>{blank(enrollment.total) || '—'}</td>
+
+                        <td>
+                          {enrollment.letter_grade
+                            ? `${enrollment.letter_grade} (${Number(enrollment.grade_point).toFixed(2)})`
+                            : 'Not published'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
 
-              <div className="table-container">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Course</th>
-                      <th>Exam</th>
-                      <th>Marks</th>
-                      <th>Grade</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {progress.results.map(result => (
-                      <tr key={result.exam_id}>
-                        <td>{result.course_code}</td>
-                        <td>{result.exam_type}</td>
-                        <td>{marksText(result)}</td>
-                        <td>{result.grade || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {!progress.results.length && (
-                <p>No accessible results yet.</p>
+              {!progress.enrollments.length && (
+                <p>No accessible enrollments yet.</p>
               )}
             </div>
           )}
         </>
       )}
 
-      {tab === 'exams' && (
+      {tab === 'marks' && (
         <>
-          <form
-            className="card"
-            onSubmit={event => {
-              event.preventDefault()
-
-              act(async () => {
-                const { data: created } = await api.post(
-                  '/faculty-portal/exams',
-                  exam
-                )
-
-                await loadRoster(created.exam_id)
-              })
-            }}
-          >
-            <h2>Create a shared exam</h2>
+          <div className="card">
+            <h2>Marks entry</h2>
 
             <p>
-              Use the same academic year and term as the
-              students’ enrollments.
+              Choose one of your courses. Each student has three
+              components; the total is calculated automatically.
+              You can save some students now and the rest later.
+              Marks are locked once the admin publishes the result.
             </p>
 
-            <div className="form-row">
-              <label className="form-group">
-                Course
+            <label className="form-group">
+              Course
 
-                <select
-                  className="form-select"
-                  name="course_id"
-                  value={exam.course_id}
-                  onChange={editExam}
-                  required
-                >
-                  <option value="">
-                    Select your course
+              <select
+                className="form-select"
+                value={sheet?.course.course_id ?? ''}
+                disabled={busy}
+                onChange={event => {
+                  const value = Number(event.target.value)
+                  setMessage('')
+
+                  if (value) {
+                    act(() => loadSheet(value))
+                  }
+                }}
+              >
+                <option value="">Select your course</option>
+
+                {mine.map(course => (
+                  <option
+                    key={course.course_id}
+                    value={course.course_id}
+                  >
+                    {course.course_code}
+                    {' — '}
+                    {course.department_code} {course.level}-{course.term}
+                    {' ('}
+                    {course.marked_count}/{course.student_count}
+                    {' complete)'}
                   </option>
-
-                  {mine
-                    .filter(course => course.active)
-                    .map(course => (
-                      <option
-                        key={course.course_id}
-                        value={course.course_id}
-                      >
-                        {course.course_code}
-                      </option>
-                    ))}
-                </select>
-              </label>
-
-              <label className="form-group">
-                Academic year
-
-                <input
-                  className="form-input"
-                  name="academic_year"
-                  maxLength={20}
-                  value={exam.academic_year}
-                  onChange={editExam}
-                  required
-                />
-              </label>
-
-              <label className="form-group">
-                Term
-
-                <select
-                  className="form-select"
-                  name="term"
-                  value={exam.term}
-                  onChange={editExam}
-                >
-                  {['Fall', 'Spring', 'Summer'].map(term => (
-                    <option key={term}>{term}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div className="form-row">
-              <label className="form-group">
-                Exam type / name
-
-                <input
-                  className="form-input"
-                  name="exam_type"
-                  maxLength={50}
-                  value={exam.exam_type}
-                  onChange={editExam}
-                  required
-                />
-              </label>
-
-              <label className="form-group">
-                Date
-
-                <input
-                  className="form-input"
-                  name="exam_date"
-                  type="date"
-                  value={exam.exam_date}
-                  onChange={editExam}
-                  required
-                />
-              </label>
-
-              <label className="form-group">
-                Total marks
-
-                <input
-                  className="form-input"
-                  name="total_marks"
-                  type="number"
-                  min="0.01"
-                  max="9999.99"
-                  step="0.01"
-                  value={exam.total_marks}
-                  onChange={editExam}
-                  required
-                />
-              </label>
-            </div>
-
-            <button
-              className="btn btn-primary"
-              disabled={
-                busy ||
-                !mine.some(course => course.active)
-              }
-            >
-              Create draft exam
-            </button>
-          </form>
-
-          <div className="card table-container">
-            <h2>My exams</h2>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>Course / exam</th>
-                  <th>Year / term</th>
-                  <th>Date</th>
-                  <th>Grading</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {data.exams.map(item => (
-                  <tr key={item.exam_id}>
-                    <td>
-                      {item.course_code}
-                      {' — '}
-                      {item.exam_type}
-                    </td>
-
-                    <td>
-                      {item.academic_year} / {item.term}
-                    </td>
-
-                    <td>{calendarDate(item.exam_date)}</td>
-                    <td>{item.graded_count} graded</td>
-
-                    <td>
-                      {item.published
-                        ? 'Published'
-                        : 'Draft'}
-
-                      {awaitingAdmin(item.exam_id) &&
-                        ' · awaiting admin'}
-
-                      {!item.can_edit && ' · Read-only'}
-                    </td>
-
-                    <td>
-                      <button
-                        className="btn btn-sm btn-primary"
-                        disabled={busy}
-                        onClick={() => {
-                          setMessage('')
-                          act(() => loadRoster(item.exam_id))
-                        }}
-                      >
-                        Open marks
-                      </button>
-                      {' '}
-
-                      {!item.published &&
-                        item.graded_count === 0 && (
-                          <button
-                            className="btn btn-sm btn-danger"
-                            disabled={busy || !item.can_edit}
-                            onClick={() => {
-                              if (window.confirm(
-                                'Delete this ungraded draft exam?'
-                              )) {
-                                act(async () => {
-                                  await api.delete(
-                                    `/faculty-portal/exams/${item.exam_id}`
-                                  )
-
-                                  if (
-                                    rosterId.current === item.exam_id
-                                  ) {
-                                    rosterId.current = null
-                                    setRoster(null)
-                                    dirtyRows.current.clear()
-                                  }
-                                })
-                              }
-                            }}
-                          >
-                            Delete draft
-                          </button>
-                        )}
-                    </td>
-                  </tr>
                 ))}
-              </tbody>
-            </table>
+              </select>
+            </label>
+
+            {!mine.length && (
+              <p>You have no assigned courses.</p>
+            )}
           </div>
 
-          {roster && (
+          {sheet && (
             <div className="card table-container">
               <div
                 style={{
@@ -1019,118 +780,73 @@ export default function FacultyDashboard() {
               >
                 <div>
                   <h2 style={{ margin: 0 }}>
-                    Marks — {openExamMeta?.course_code}
-                    {' '}
-                    {roster.exam.exam_type}
+                    {sheet.course.course_code}
+                    {' — '}
+                    {sheet.course.course_title}
                   </h2>
 
                   <p style={{ margin: '4px 0 0' }}>
-                    {roster.exam.academic_year}
-                    {' / '}
-                    {roster.exam.term}
-                    {' · out of '}
-                    {roster.exam.total_marks}
+                    {sheet.course.department_code}
+                    {' '}
+                    {termOf(sheet.course)}
                     {' · '}
-                    {roster.students.length}
-                    {' enrolled student(s)'}
+                    {sheet.students.length}
+                    {' enrolled student(s) · '}
+                    {sheet.students.filter(s => s.total !== null).length}
+                    {' complete'}
                   </p>
                 </div>
 
-                <span
-                  className={`badge badge-${
-                    roster.exam.published
-                      ? 'success'
-                      : awaitingAdmin(roster.exam.exam_id)
-                        ? 'warning'
-                        : 'secondary'
-                  }`}
-                >
-                  {roster.exam.published
-                    ? 'Published'
-                    : awaitingAdmin(roster.exam.exam_id)
-                      ? 'Awaiting admin approval'
-                      : 'Draft'}
-                </span>
+                {sheet.course.term_published && (
+                  <span className="badge badge-success">
+                    Result published
+                  </span>
+                )}
               </div>
-
-              <p>
-                Enter marks for every enrolled student below, then
-                save (per row or all at once). Blank marks stay
-                ungraded until the exam is published, when they
-                are recorded as 0. Request Publish sends this
-                entire exam to the admin — every student’s result
-                is published together after approval.
-              </p>
-
-              {!roster.exam.can_edit && (
-                <p>
-                  Read-only: you are not assigned to this active
-                  course. Any unsaved drafts have not been recorded.
-                </p>
-              )}
 
               <div
                 style={{
                   display: 'flex',
                   gap: 8,
+                  alignItems: 'center',
                   marginBottom: 12
                 }}
               >
                 <button
-                  className="btn btn-secondary"
-                  disabled={
-                    busy ||
-                    !roster.exam.can_edit ||
-                    dirtyRows.current.size === 0
-                  }
-                  onClick={saveAllMarks}
+                  className="btn btn-primary"
+                  disabled={busy || unsaved === 0}
+                  onClick={saveMarks}
                 >
-                  Save all marks
+                  Save marks
                 </button>
 
-                <button
-                  className="btn btn-primary"
-                  disabled={
-                    busy ||
-                    roster.exam.published ||
-                    awaitingAdmin(roster.exam.exam_id)
-                  }
-                  onClick={requestPublish}
-                >
-                  {roster.exam.published
-                    ? 'Published'
-                    : awaitingAdmin(roster.exam.exam_id)
-                      ? 'Awaiting admin approval'
-                      : 'Request Publish'}
-                </button>
+                {unsaved > 0 && (
+                  <small>{unsaved} row(s) with unsaved changes</small>
+                )}
               </div>
 
               <table>
                 <thead>
                   <tr>
                     <th>Student</th>
-                    <th>Enrollment</th>
-                    <th>Marks</th>
-                    <th>Remarks</th>
-                    <th>Save</th>
+                    {sheet.components.map(component => (
+                      <th key={component.key}>
+                        {component.label} (max {component.max})
+                      </th>
+                    ))}
+                    <th>Total</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {roster.students.map(student => {
-                    const row =
-                      drafts[student.enrollment_id] || {}
-
-                    const editable =
-                      roster.exam.can_edit &&
-                      ['enrolled', 'completed'].includes(
-                        student.status
-                      )
+                  {sheet.students.map(student => {
+                    const row = drafts[student.enrollment_id] || {}
+                    const editable = !student.locked
+                    const dirty = dirtyRows.current.has(student.enrollment_id)
 
                     const edit = (field, value) => {
-                      dirtyRows.current.add(
-                        student.enrollment_id
-                      )
+                      dirtyRows.current.add(student.enrollment_id)
 
                       setDrafts(old => ({
                         ...old,
@@ -1142,6 +858,18 @@ export default function FacultyDashboard() {
                       }))
                     }
 
+                    const filled = sheet.components.every(
+                      component => row[component.key] !== ''
+                    )
+
+                    const preview = filled
+                      ? sheet.components.reduce(
+                          (sum, component) =>
+                            sum + Number(row[component.key]),
+                          0
+                        )
+                      : null
+
                     return (
                       <tr key={student.enrollment_id}>
                         <td>
@@ -1150,112 +878,60 @@ export default function FacultyDashboard() {
                           {student.full_name}
                         </td>
 
-                        <td>
-                          <span className={`badge badge-${
-                            ['enrolled', 'completed'].includes(
-                              student.status
-                            )
-                              ? 'success'
-                              : student.status === 'dropped'
-                                ? 'danger'
-                                : 'secondary'
-                          }`}>
-                            {student.status}
-                          </span>
-                        </td>
+                        {sheet.components.map(component => {
+                          const value = row[component.key] ?? ''
+                          const invalid = invalidValue(value, component.max)
 
-                        <td>
-                          <input
-                            aria-label={
-                              `Marks for ${student.full_name}`
-                            }
-                            className="form-input"
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            max={roster.exam.total_marks}
-                            value={row.obtained_marks ?? ''}
-                            disabled={busy || !editable}
-                            onChange={event =>
-                              edit(
-                                'obtained_marks',
-                                event.target.value
-                              )
-                            }
-                          />
-                        </td>
-
-                        <td>
-                          <input
-                            aria-label={
-                              `Remarks for ${student.full_name}`
-                            }
-                            className="form-input"
-                            maxLength={2000}
-                            value={row.remarks || ''}
-                            disabled={busy || !editable}
-                            onChange={event =>
-                              edit(
-                                'remarks',
-                                event.target.value
-                              )
-                            }
-                          />
-                        </td>
-
-                        <td>
-                          <button
-                            className="btn btn-sm btn-primary"
-                            disabled={busy || !editable}
-                            onClick={() => act(async () => {
-                              const { data: saved } =
-                                await api.put(
-                                  `/faculty-portal/exams/${roster.exam.exam_id}/results/${student.enrollment_id}`,
-                                  {
-                                    obtained_marks:
-                                      row.obtained_marks === ''
-                                        ? null
-                                        : row.obtained_marks,
-
-                                    remarks: row.remarks
-                                  }
-                                )
-
-                              dirtyRows.current.delete(
-                                student.enrollment_id
-                              )
-
-                              setDrafts(old => ({
-                                ...old,
-
-                                [student.enrollment_id]: {
-                                  obtained_marks:
-                                    saved.obtained_marks ?? '',
-
-                                  remarks:
-                                    saved.remarks || ''
+                          return (
+                            <td key={component.key}>
+                              <input
+                                aria-label={
+                                  `${component.label} for ${student.full_name}`
                                 }
-                              }))
+                                aria-invalid={invalid}
+                                className="form-input"
+                                style={{
+                                  maxWidth: 110,
+                                  ...(invalid && {
+                                    borderColor: 'var(--danger)'
+                                  })
+                                }}
+                                type="number"
+                                inputMode="decimal"
+                                min="0"
+                                max={component.max}
+                                step="0.01"
+                                value={value}
+                                disabled={busy || !editable}
+                                onChange={event =>
+                                  edit(component.key, event.target.value)
+                                }
+                              />
+                            </td>
+                          )
+                        })}
 
-                              setRoster(old => ({
-                                ...old,
-                                students: old.students.map(
-                                  person =>
-                                    person.enrollment_id ===
-                                      student.enrollment_id
-                                      ? { ...person, ...saved }
-                                      : person
-                                )
-                              }))
-                            })}
-                          >
-                            Save
-                          </button>
+                        <td>
+                          {preview === null ? '—' : Number(preview.toFixed(2))}
+                        </td>
 
-                          {dirtyRows.current.has(
-                            student.enrollment_id
-                          ) && (
-                            <small> Unsaved</small>
+                        <td>
+                          {student.locked ? (
+                            <span className="badge badge-success">
+                              Published
+                            </span>
+                          ) : dirty ? (
+                            <span className="badge badge-warning">
+                              Unsaved
+                            </span>
+                          ) : student.total !== null ? (
+                            <span className="badge badge-success">
+                              Complete
+                            </span>
+                          ) : (
+                            <span className="badge badge-secondary">
+                              Incomplete
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -1264,82 +940,14 @@ export default function FacultyDashboard() {
                 </tbody>
               </table>
 
-              {!roster.students.length && (
+              {!sheet.students.length && (
                 <p>
-                  No students are enrolled for this
-                  course/year/term.
+                  No students have completed registration and
+                  payment for this course yet.
                 </p>
               )}
             </div>
           )}
-
-          <div className="card table-container">
-            <h2>My publish requests</h2>
-
-            <p>
-              One request covers a whole exam. After the admin
-              accepts, every student’s result for that exam is
-              published together.
-            </p>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>Exam</th>
-                  <th>Year / term</th>
-                  <th>Requested</th>
-                  <th>Status</th>
-                  <th>Reviewed</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {publishRequests.map(request => (
-                  <tr key={request.request_id}>
-                    <td>
-                      {request.course_code}
-                      {' — '}
-                      {request.exam_type}
-                    </td>
-
-                    <td>
-                      {request.academic_year} / {request.term}
-                    </td>
-
-                    <td>
-                      {new Date(
-                        request.requested_on
-                      ).toLocaleString()}
-                    </td>
-
-                    <td>
-                      <span className={`badge badge-${
-                        request.status === 'approved'
-                          ? 'success'
-                          : request.status === 'rejected'
-                            ? 'danger'
-                            : 'warning'
-                      }`}>
-                        {request.status}
-                      </span>
-                    </td>
-
-                    <td>
-                      {request.reviewed_on
-                        ? new Date(
-                            request.reviewed_on
-                          ).toLocaleString()
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {!publishRequests.length && (
-              <p>No publish requests yet.</p>
-            )}
-          </div>
         </>
       )}
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../api'
+import CgpaValue from '../components/CgpaValue'
 
 const Students = () => {
   const [students, setStudents] = useState([])
@@ -19,7 +20,8 @@ const Students = () => {
     program_id: '',
     advisor_id: '',
     current_status: 'active',
-    current_cgpa: '0.00'
+    current_level: '1',
+    current_term: '1'
   })
 
   useEffect(() => {
@@ -62,7 +64,8 @@ const Students = () => {
         program_id: '',
         advisor_id: '',
         current_status: 'active',
-        current_cgpa: '0.00'
+        current_level: '1',
+        current_term: '1'
       })
       loadStudents()
     } catch (err) {
@@ -114,6 +117,7 @@ const Students = () => {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Program</th>
+                <th>Level-Term</th>
                 <th>Status</th>
                 <th>CGPA</th>
                 <th>Actions</th>
@@ -126,12 +130,13 @@ const Students = () => {
                   <td>{student.full_name}</td>
                   <td>{student.email}</td>
                   <td>{student.program_name}</td>
+                  <td>{student.current_level}-{student.current_term}</td>
                   <td>
                     <span className={`badge badge-${student.current_status === 'active' ? 'success' : 'danger'}`}>
                       {student.current_status}
                     </span>
                   </td>
-                  <td>{parseFloat(student.current_cgpa).toFixed(2)}</td>
+                  <td><CgpaValue value={student.current_cgpa} note={false} /></td>
                   <td>
                     <Link to={`/students/${student.student_id}`} className="btn btn-sm btn-secondary">View</Link>
                   </td>
@@ -235,6 +240,29 @@ const Students = () => {
                     <option key={p.program_id} value={p.program_id}>{p.program_name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Current Level *</label>
+                  <select
+                    className="form-select"
+                    value={formData.current_level}
+                    onChange={(e) => setFormData({...formData, current_level: e.target.value})}
+                  >
+                    {[1, 2, 3, 4].map(n => <option key={n} value={n}>Level {n}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Current Term *</label>
+                  <select
+                    className="form-select"
+                    value={formData.current_term}
+                    onChange={(e) => setFormData({...formData, current_term: e.target.value})}
+                  >
+                    {[1, 2].map(n => <option key={n} value={n}>Term {n}</option>)}
+                  </select>
+                </div>
               </div>
                   <div className="form-group">
   <label className="form-label">Initial password *</label>

@@ -1,10 +1,3 @@
-const {
-  check,
-  id,
-  text,
-  date
-} = require('./common');
-
 const FEE_AMOUNT = 1000;
 
 const demoEnabled = () =>
@@ -18,6 +11,8 @@ const enrollmentSQL = `
     c.course_code,
     c.course_title,
     c.credit_hours,
+    c.level,
+    c.term AS course_term,
     a.full_name AS authorized_by_name,
 
     CASE
@@ -157,101 +152,10 @@ async function listPayments(
   return result.rows;
 }
 
-async function createPendingEnrollment(
-  db,
-  input,
-  adminId
-) {
-  const studentId = id(input.student_id, 'student');
-  const courseId = id(input.course_id, 'course');
-
-  const year = text(
-    input.academic_year,
-    'academic year',
-    20
-  );
-
-  const term = text(input.term, 'term', 20);
-
-  const enrolledOn = date(
-    input.enrolled_on,
-    'authorization date'
-  );
-
-  const valid = await db.query(`
-    SELECT 1
-    FROM student s
-
-    JOIN users u
-      ON u.user_id=s.user_id
-
-    JOIN course c
-      ON c.program_id=s.program_id
-
-    WHERE s.student_id=$1
-      AND c.course_id=$2
-      AND s.current_status='active'
-      AND u.status='active'
-      AND c.active=TRUE
-
-    FOR SHARE OF s,u,c
-  `, [studentId, courseId]);
-
-  check(
-    valid.rowCount,
-    'Student/course is inactive or the program does not match'
-  );
-
-  const result = await db.query(`
-    INSERT INTO enrollment (
-      student_id,
-      course_id,
-      authorized_by_admin_id,
-      academic_year,
-      term,
-      enrolled_on,
-      status,
-      fee_required
-    )
-    VALUES (
-      $1,$2,$3,$4,$5,
-      COALESCE($6::date,CURRENT_DATE),
-      'pending_payment',
-      TRUE
-    )
-
-    ON CONFLICT (
-      student_id,
-      course_id,
-      academic_year,
-      term
-    )
-    DO NOTHING
-
-    RETURNING *
-  `, [
-    studentId,
-    courseId,
-    adminId,
-    year,
-    term,
-    enrolledOn
-  ]);
-
-  check(
-    result.rowCount,
-    'An approval/enrollment already exists for this course, year and term',
-    409
-  );
-
-  return result.rows[0];
-}
-
 module.exports = {
   FEE_AMOUNT,
   demoEnabled,
   enrollmentSQL,
   coursePaymentSQL,
-  listPayments,
-  createPendingEnrollment
+  listPayments
 };

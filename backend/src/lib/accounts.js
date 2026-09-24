@@ -1,8 +1,10 @@
 const bcrypt = require('bcryptjs');
 
 const {
-  check, text, id, email, password, date, number, log
+  check, text, id, email, password, date, log
 } = require('./common');
+
+const academic = require('./academic');
 
 const tables = {
   admin: 'admin',
@@ -25,7 +27,7 @@ const selects = {
   `,
   student: `
     SELECT
-      s.*,p.program_name,p.degree_level,
+      s.*,p.program_name,p.degree_level,p.department_id,
       f.full_name AS advisor_name,
       a.full_name AS verified_by_name
     FROM student s
@@ -119,7 +121,10 @@ async function validateProfile(db, role, body, previous = null) {
 
     body.date_of_birth = date(body.date_of_birth, 'date of birth');
     body.admission_date = date(body.admission_date, 'admission date');
-    body.current_cgpa = number(body.current_cgpa ?? 0, 'CGPA', 0, 4);
+
+    // CGPA is derived from published results and is never entered.
+    body.current_level = academic.level(body.current_level ?? 1);
+    body.current_term = academic.term(body.current_term ?? 1);
   } else if (role === 'faculty') {
     body.department_id = id(body.department_id, 'department');
 
@@ -216,11 +221,11 @@ async function createAccount(
       INSERT INTO student (
         user_id,program_id,advisor_id,verified_by_admin_id,
         registration_no,full_name,email,phone,date_of_birth,
-        admission_date,current_status,current_cgpa
+        admission_date,current_status,current_level,current_term
       )
       VALUES(
         $1,$2,$3,$4,$5,$6,$7,$8,$9,
-        COALESCE($10::date,CURRENT_DATE),$11,$12
+        COALESCE($10::date,CURRENT_DATE),$11,$12,$13
       )
       RETURNING student_id
     `, [
@@ -235,7 +240,8 @@ async function createAccount(
       body.date_of_birth,
       body.admission_date,
       body.current_status || 'active',
-      body.current_cgpa
+      body.current_level,
+      body.current_term
     ]);
   }
 
@@ -344,15 +350,17 @@ async function updateAccount(db, role, key, input, actorId) {
           registration_no=$3,
           admission_date=COALESCE($4::date,admission_date),
           current_status=$5,
-          current_cgpa=$6
-      WHERE student_id=$7
+          current_level=$6,
+          current_term=$7
+      WHERE student_id=$8
     `, [
       body.program_id,
       body.advisor_id,
       body.registration_no,
       body.admission_date,
       body.current_status,
-      body.current_cgpa,
+      body.current_level,
+      body.current_term,
       key
     ]);
   }

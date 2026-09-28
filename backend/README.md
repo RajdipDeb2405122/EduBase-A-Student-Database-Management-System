@@ -5,7 +5,7 @@
 2. `npm install`
 3. `npm run db:init` — creates schema (src/scripts/schema.sql)
 4. `npm run db:seed` — loads demo admin/student/faculty accounts
-5. `npm run dev` — API on http://localhost:5000
+5. `npm run dev` — API on http://localhost:5001
 
 ## Demo accounts (after seeding)
 - Admin: see seed output in src/scripts/seedDb.js

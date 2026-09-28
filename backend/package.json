@@ -11,7 +11,8 @@
     "db:migrate": "node src/scripts/migrate.js",
     "db:seed-catalog": "node src/scripts/seedCatalog.js",
     "db:seed-demo": "node src/scripts/seedDemo.js",
-    "db:demo-marks": "node src/scripts/fillDemoMarks.js"
+    "db:demo-marks": "node src/scripts/fillDemoMarks.js",
+    "test": "node --test test/"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

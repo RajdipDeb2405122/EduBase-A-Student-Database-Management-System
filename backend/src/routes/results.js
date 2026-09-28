@@ -89,7 +89,9 @@ router.post('/publish', wrap(async (req, res) => {
       'PUBLISH',
       `Published ${s.department.department_code} ${evaluation.label} results ` +
         `for ${published.length} student(s); ` +
-        `${evaluation.students.filter(x => x.state === 'excluded').length} excluded`
+        `${evaluation.students.filter(x => x.state === 'excluded').length} excluded; ` +
+        `${published.filter(x => x.advanced_to).length} advanced; ` +
+        `${evaluation.released.length} teaching assignment(s) released`
     );
 
     return { department: s.department, ...evaluation };

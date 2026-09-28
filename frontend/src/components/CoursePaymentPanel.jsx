@@ -48,6 +48,14 @@ export default function CoursePaymentPanel({
                     {enrollment.course_code}
                     {' — '}
                     {enrollment.course_title}
+                    {enrollment.is_retake && (
+                      <>
+                        {' '}
+                        <span className="badge badge-warning">
+                          Retake
+                        </span>
+                      </>
+                    )}
                   </td>
 
                   <td>

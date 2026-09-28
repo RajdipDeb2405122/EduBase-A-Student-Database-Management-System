@@ -31,6 +31,44 @@ function gradeFor(total) {
   return { letter: band.letter, point: band.point };
 }
 
+// Retakes are assessed on the Final exam only (out of 70) and carry
+// a grade-point penalty when passed.
+const RETAKE_COMPONENT = 'semester_final';
+const RETAKE_PENALTY = 0.5;
+
+// percentage = final / 70 * 100 is graded on the normal scale (raw).
+// Pass/fail follows the RAW grade. A pass records raw GP - 0.50 with
+// the letter of that GP when the scale has one, otherwise the raw
+// letter (shown with a "Retake" marker). A raw F stays F / 0.00.
+function retakeGrade(finalMarks) {
+  const max = MARK_COMPONENTS.find(c => c.key === RETAKE_COMPONENT).max;
+  const exact = Number(finalMarks) / max * 100;
+  // Graded unrounded (like course totals); stored to 2 decimals.
+  const raw = gradeFor(exact);
+  const percentage = Math.round(exact * 100) / 100;
+
+  if (raw.letter === 'F') {
+    return {
+      percentage,
+      raw,
+      letter: 'F',
+      point: 0,
+      passed: false
+    };
+  }
+
+  const point = Math.round((raw.point - RETAKE_PENALTY) * 100) / 100;
+  const match = GRADE_SCALE.find(g => g.letter !== 'F' && g.point === point);
+
+  return {
+    percentage,
+    raw,
+    letter: match ? match.letter : raw.letter,
+    point,
+    passed: true
+  };
+}
+
 // Credit-weighted average of grade points, rounded to 2 decimals.
 // Returns null when there are no credits (nothing completed yet).
 function weightedAverage(rows) {
@@ -50,6 +88,9 @@ function weightedAverage(rows) {
 module.exports = {
   MARK_COMPONENTS,
   GRADE_SCALE,
+  RETAKE_COMPONENT,
+  RETAKE_PENALTY,
   gradeFor,
+  retakeGrade,
   weightedAverage
 };

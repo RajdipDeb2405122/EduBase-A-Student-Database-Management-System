@@ -289,7 +289,8 @@ async function updateAccount(db, role, key, input, actorId) {
     const used = await db.query(`
       SELECT 1 FROM course WHERE faculty_id=$1
       UNION ALL
-      SELECT 1 FROM course_teacher WHERE faculty_id=$1
+      SELECT 1 FROM course_teacher
+      WHERE faculty_id=$1 AND released_at IS NULL
       LIMIT 1
     `, [key]);
 

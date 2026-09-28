@@ -12,6 +12,7 @@ const {
 } = require('../lib/common');
 
 const academic = require('../lib/academic');
+const teaching = require('../lib/teaching');
 
 const courseSQL = `
   SELECT
@@ -78,14 +79,15 @@ async function fields(db, body) {
   };
 }
 
-// Keeps course_teacher in step with the admin-chosen instructor.
+// The admin-chosen instructor becomes the course's single active
+// teacher (course.faculty_id is kept in step by a trigger). Choosing
+// "none" removes the current assignment; choosing someone else while
+// a teacher holds the course is refused — remove it first.
 async function assignInstructor(db, courseId, facultyId) {
   if (facultyId) {
-    await db.query(`
-      INSERT INTO course_teacher (course_id,faculty_id)
-      VALUES ($1,$2)
-      ON CONFLICT DO NOTHING
-    `, [courseId, facultyId]);
+    await teaching.assign(db, courseId, facultyId);
+  } else {
+    await teaching.release(db, courseId, 'removed');
   }
 }
 
@@ -123,13 +125,13 @@ router.post('/', wrap(async (req, res) => {
 
     const r = await db.query(`
       INSERT INTO course (
-        department_id,faculty_id,course_code,course_title,
+        department_id,course_code,course_title,
         credit_hours,level,term,course_type,active
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
       RETURNING course_id
     `, [
-      c.department_id, c.faculty_id, c.course_code, c.course_title,
+      c.department_id, c.course_code, c.course_title,
       c.credit_hours, c.level, c.term, c.course_type, c.active
     ]);
 
@@ -187,29 +189,19 @@ router.put('/:id', wrap(async (req, res) => {
     await db.query(`
       UPDATE course
       SET department_id=$1,
-          faculty_id=$2,
-          course_code=$3,
-          course_title=$4,
-          credit_hours=$5,
-          level=$6,
-          term=$7,
-          course_type=$8,
-          active=$9
-      WHERE course_id=$10
+          course_code=$2,
+          course_title=$3,
+          credit_hours=$4,
+          level=$5,
+          term=$6,
+          course_type=$7,
+          active=$8
+      WHERE course_id=$9
     `, [
-      c.department_id, c.faculty_id, c.course_code, c.course_title,
+      c.department_id, c.course_code, c.course_title,
       c.credit_hours, c.level, c.term, c.course_type, c.active,
       courseId
     ]);
-
-    // Replacing the instructor also removes the previous one's
-    // marks-entry access to this course.
-    if (before.faculty_id && before.faculty_id !== c.faculty_id) {
-      await db.query(`
-        DELETE FROM course_teacher
-        WHERE course_id=$1 AND faculty_id=$2
-      `, [courseId, before.faculty_id]);
-    }
 
     await assignInstructor(db, courseId, c.faculty_id);
 

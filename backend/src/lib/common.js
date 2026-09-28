@@ -165,10 +165,16 @@ function errors(error, req, res, next) {
     '23502': [400, 'A required value is missing.']
   };
 
-  const [status, message] = codes[error.code] || [
+  let [status, message] = codes[error.code] || [
     error.status || 500,
     error.status ? error.message : 'Internal server error'
   ];
+
+  // Business rules raised by our triggers (RAISE EXCEPTION, no
+  // constraint name) carry a message written for the user.
+  if (error.code === '23514' && !error.constraint && error.where) {
+    message = error.message;
+  }
 
   if (status >= 500) console.error(error);
 

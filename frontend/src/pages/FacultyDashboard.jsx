@@ -19,12 +19,24 @@ const termOf = course => `Level ${course.level}, Term ${course.term}`
 const blank = value =>
   value === null || value === undefined ? '' : String(Number(value))
 
-// Client-side hint only; the server validates every value.
-function invalidValue(value, max) {
-  if (value === '') return false
-  if (!/^\d+(\.\d{1,2})?$/.test(value)) return true
-  return Number(value) > max
+// Inline message for one mark box, or '' when it is fine. The same
+// limits are enforced by the server and the database.
+function markError(value, max) {
+  if (value === '') return ''
+
+  const n = Number(value)
+
+  if (!Number.isFinite(n)) return 'Enter a number'
+  if (n < 0) return 'Mark cannot be negative'
+  if (n > max) return `Maximum mark is ${max}`
+  if (!/^\d+(\.\d{1,2})?$/.test(value)) return 'At most 2 decimal places'
+
+  return ''
 }
+
+// Retake students have only the Final exam component.
+const enabledFor = (sheet, student, component) =>
+  !student.is_retake || component.key === sheet.retake_component
 
 export default function FacultyDashboard() {
   const { logout } = useAuth()
@@ -101,10 +113,14 @@ export default function FacultyDashboard() {
             old[student.enrollment_id]
               ? old[student.enrollment_id]
               : Object.fromEntries(
-                  next.components.map(component => [
-                    component.key,
-                    blank(student[component.key])
-                  ])
+                  next.components
+                    .filter(component =>
+                      enabledFor(next, student, component)
+                    )
+                    .map(component => [
+                      component.key,
+                      blank(student[component.key])
+                    ])
                 )
           ])
         )
@@ -291,6 +307,11 @@ export default function FacultyDashboard() {
       return
     }
 
+    if (invalidCount) {
+      setError('Fix the highlighted marks before saving.')
+      return
+    }
+
     act(async () => {
       const { data: saved } = await api.put(
         `/faculty-portal/courses/${sheet.course.course_id}/marks`,
@@ -305,6 +326,21 @@ export default function FacultyDashboard() {
   }
 
   const unsaved = dirtyRows.current.size
+
+  // Any invalid box in the sheet blocks saving.
+  const invalidCount = sheet
+    ? sheet.students.reduce(
+        (sum, student) =>
+          sum + sheet.components.filter(component =>
+            enabledFor(sheet, student, component) &&
+            markError(
+              drafts[student.enrollment_id]?.[component.key] ?? '',
+              component.max
+            )
+          ).length,
+        0
+      )
+    : 0
 
   return (
     <div style={{
@@ -477,6 +513,8 @@ export default function FacultyDashboard() {
 
                       <td>
                         {course.marked_count} / {course.student_count}
+                        {course.retake_count > 0 &&
+                          ` (incl. ${course.retake_count} retake)`}
                       </td>
 
                       <td>
@@ -523,9 +561,9 @@ export default function FacultyDashboard() {
             <h2>Available courses in my department</h2>
 
             <p>
-              You can add any active course in your
-              department, even if another teacher already
-              teaches it.
+              Each course has one teacher per term. A course
+              another teacher has taken stays with them until they
+              remove it or the admin publishes the term's result.
             </p>
 
             <div className="table-container">
@@ -534,6 +572,7 @@ export default function FacultyDashboard() {
                   <tr>
                     <th>Course</th>
                     <th>Term</th>
+                    <th>Teacher</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -550,16 +589,31 @@ export default function FacultyDashboard() {
                       <td>{termOf(course)}</td>
 
                       <td>
+                        {course.assigned_faculty_id ? (
+                          <span className="badge badge-secondary">
+                            Assigned to {course.assigned_faculty_name}
+                          </span>
+                        ) : (
+                          <span className="badge badge-success">
+                            Available
+                          </span>
+                        )}
+                      </td>
+
+                      <td>
                         <button
                           className="btn btn-sm btn-primary"
-                          disabled={busy}
+                          disabled={busy || Boolean(course.assigned_faculty_id)}
+                          title={course.assigned_faculty_id
+                            ? `Already assigned to ${course.assigned_faculty_name}`
+                            : undefined}
                           onClick={() => act(() =>
                             api.post(
                               `/faculty-portal/courses/${course.course_id}`
                             )
                           )}
                         >
-                          Add to my courses
+                          {course.assigned_faculty_id ? 'Taken' : 'Take course'}
                         </button>
                       </td>
                     </tr>
@@ -678,6 +732,7 @@ export default function FacultyDashboard() {
                           {enrollment.course_code}
                           {' — '}
                           {enrollment.course_title}
+                          {enrollment.is_retake && ' (Retake)'}
                         </td>
 
                         <td>
@@ -792,8 +847,10 @@ export default function FacultyDashboard() {
                     {' · '}
                     {sheet.students.length}
                     {' enrolled student(s) · '}
-                    {sheet.students.filter(s => s.total !== null).length}
+                    {sheet.students.filter(s => s.complete).length}
                     {' complete'}
+                    {sheet.students.some(s => s.is_retake) &&
+                      ` · ${sheet.students.filter(s => s.is_retake).length} retake`}
                   </p>
                 </div>
 
@@ -814,13 +871,17 @@ export default function FacultyDashboard() {
               >
                 <button
                   className="btn btn-primary"
-                  disabled={busy || unsaved === 0}
+                  disabled={busy || unsaved === 0 || invalidCount > 0}
                   onClick={saveMarks}
                 >
                   Save marks
                 </button>
 
-                {unsaved > 0 && (
+                {invalidCount > 0 ? (
+                  <small style={{ color: 'var(--danger)' }}>
+                    {invalidCount} invalid mark(s) — fix them to save
+                  </small>
+                ) : unsaved > 0 && (
                   <small>{unsaved} row(s) with unsaved changes</small>
                 )}
               </div>
@@ -858,17 +919,26 @@ export default function FacultyDashboard() {
                       }))
                     }
 
-                    const filled = sheet.components.every(
-                      component => row[component.key] !== ''
+                    const active = sheet.components.filter(component =>
+                      enabledFor(sheet, student, component)
+                    )
+
+                    const filled = active.every(
+                      component => (row[component.key] ?? '') !== ''
                     )
 
                     const preview = filled
-                      ? sheet.components.reduce(
+                      ? active.reduce(
                           (sum, component) =>
                             sum + Number(row[component.key]),
                           0
                         )
                       : null
+
+                    const maxTotal = active.reduce(
+                      (sum, component) => sum + component.max,
+                      0
+                    )
 
                     return (
                       <tr key={student.enrollment_id}>
@@ -876,11 +946,30 @@ export default function FacultyDashboard() {
                           {student.registration_no}
                           {' — '}
                           {student.full_name}
+                          {student.is_retake && (
+                            <>
+                              {' '}
+                              <span className="badge badge-warning">
+                                Retake
+                              </span>
+                            </>
+                          )}
                         </td>
 
                         {sheet.components.map(component => {
+                          if (!enabledFor(sheet, student, component)) {
+                            return (
+                              <td
+                                key={component.key}
+                                title="Retake students are assessed on the Final exam only"
+                              >
+                                N/A
+                              </td>
+                            )
+                          }
+
                           const value = row[component.key] ?? ''
-                          const invalid = invalidValue(value, component.max)
+                          const problem = markError(value, component.max)
 
                           return (
                             <td key={component.key}>
@@ -888,11 +977,11 @@ export default function FacultyDashboard() {
                                 aria-label={
                                   `${component.label} for ${student.full_name}`
                                 }
-                                aria-invalid={invalid}
+                                aria-invalid={Boolean(problem)}
                                 className="form-input"
                                 style={{
                                   maxWidth: 110,
-                                  ...(invalid && {
+                                  ...(problem && {
                                     borderColor: 'var(--danger)'
                                   })
                                 }}
@@ -900,19 +989,39 @@ export default function FacultyDashboard() {
                                 inputMode="decimal"
                                 min="0"
                                 max={component.max}
-                                step="0.01"
+                                // Arrows move by 0.5 within 0..max; typed
+                                // values keep up to 2 decimals (there is
+                                // no <form>, so the browser's step check
+                                // never blocks them).
+                                step="0.5"
                                 value={value}
                                 disabled={busy || !editable}
                                 onChange={event =>
                                   edit(component.key, event.target.value)
                                 }
                               />
+                              {problem && (
+                                <div
+                                  role="alert"
+                                  style={{
+                                    color: 'var(--danger)',
+                                    fontSize: '0.8rem',
+                                    marginTop: 2
+                                  }}
+                                >
+                                  {problem}
+                                </div>
+                              )}
                             </td>
                           )
                         })}
 
                         <td>
-                          {preview === null ? '—' : Number(preview.toFixed(2))}
+                          {preview === null
+                            ? '—'
+                            : student.is_retake
+                              ? `${Number(preview.toFixed(2))} / ${maxTotal} (${Number((preview / maxTotal * 100).toFixed(2))}%)`
+                              : Number(preview.toFixed(2))}
                         </td>
 
                         <td>
@@ -924,7 +1033,7 @@ export default function FacultyDashboard() {
                             <span className="badge badge-warning">
                               Unsaved
                             </span>
-                          ) : student.total !== null ? (
+                          ) : student.complete ? (
                             <span className="badge badge-success">
                               Complete
                             </span>

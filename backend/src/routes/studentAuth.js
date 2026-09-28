@@ -11,6 +11,7 @@ const {
 const academic = require('../lib/academic');
 const { registrationSQL } = require('../lib/termRegistration');
 const { studentResult } = require('../lib/results');
+const retakes = require('../lib/retakes');
 
 const { login } = require('../lib/login');
 const { register } = require('../lib/registration');
@@ -235,9 +236,26 @@ router.get('/courses/:studentId', wrap(async (req, res) => {
     department_name: s.department_name,
     level: s.current_level,
     term: s.current_term,
+    current_status: s.current_status,
     required: academic.COURSES_PER_TERM,
     courses,
-    registration: registration.rows[0] || null
+    registration: registration.rows[0] || null,
+    // Failed, uncleared courses offered as Retake in this term.
+    retakes: await retakes.options(pool, req.user.student_id)
+  });
+}));
+
+// Enroll in a retake of a failed course; the fee is then paid
+// through /student-payments like any other course.
+router.post('/me/:id/retakes/:courseId', wrap(async (req, res) => {
+  const { enrollment, course } = await transaction(db =>
+    retakes.enroll(db, req.user.student_id, req.params.courseId)
+  );
+
+  res.status(201).json({
+    message:
+      `Retake of ${course.course_code} added. Pay the course fee to confirm it.`,
+    enrollment
   });
 }));
 

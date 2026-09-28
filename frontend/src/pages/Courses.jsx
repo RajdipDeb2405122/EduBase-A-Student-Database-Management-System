@@ -235,11 +235,15 @@ const Courses = () => {
                   <label className="form-label">Instructor</label>
                   <select className="form-select" value={formData.faculty_id}
                     onChange={(e) => setFormData({...formData, faculty_id: e.target.value})}>
-                    <option value="">Select Instructor</option>
+                    <option value="">Not assigned</option>
                     {departmentFaculty.map(f => (
                       <option key={f.faculty_id} value={f.faculty_id}>{f.full_name}</option>
                     ))}
                   </select>
+                  <small>
+                    One teacher per course per term. To hand the course to
+                    someone else, first save it as "Not assigned".
+                  </small>
                 </div>
               </div>
 

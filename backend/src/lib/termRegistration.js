@@ -147,6 +147,7 @@ async function freeTermCourses(db, registration) {
     JOIN course c ON c.course_id=e.course_id
     WHERE e.student_id=$1
       AND e.course_id = ANY($2)
+      AND NOT e.is_retake
   `, [
     registration.student_id,
     courses.map(c => c.course_id)

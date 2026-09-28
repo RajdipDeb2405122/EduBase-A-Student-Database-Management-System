@@ -3,10 +3,17 @@
 // accepted from the client.
 
 const { check, id } = require('./common');
-const { MARK_COMPONENTS } = require('./grading');
+const { MARK_COMPONENTS, RETAKE_COMPONENT } = require('./grading');
 
-// One value: blank means "not entered yet"; otherwise 0..max,
-// at most two decimals.
+// Components a retake student does not have.
+const RETAKE_ONLY_FINAL = MARK_COMPONENTS
+  .map(c => c.key)
+  .filter(k => k !== RETAKE_COMPONENT);
+
+// One value: blank means "not entered yet"; otherwise a number in
+// 0..max with at most two decimals. Anything else is rejected, so an
+// out-of-range mark can never reach the database (the CHECK
+// constraints on course_mark are the last guard).
 function component(value, { key, label, max }, who) {
   if (value === null || value === undefined || value === '') {
     return null;
@@ -16,16 +23,23 @@ function component(value, { key, label, max }, who) {
     ? String(value).trim()
     : '';
 
-  check(
-    /^\d+(\.\d{1,2})?$/.test(raw),
-    `${label} for ${who} must be a number with at most two decimals (got ${JSON.stringify(value)})`
-  );
-
   const n = Number(raw);
 
   check(
+    raw !== '' && Number.isFinite(n),
+    `${label} for ${who} must be a number (got ${JSON.stringify(value)})`
+  );
+
+  check(n >= 0, `${label} for ${who} cannot be negative (got ${raw})`);
+
+  check(
     n <= max,
-    `${label} for ${who} must be between 0 and ${max} (got ${raw})`
+    `${label} for ${who}: maximum mark is ${max} (got ${raw})`
+  );
+
+  check(
+    /^\d+(\.\d{1,2})?$/.test(raw),
+    `${label} for ${who} must have at most two decimals (got ${raw})`
   );
 
   return n;
@@ -71,12 +85,15 @@ function parseRows(rows) {
   });
 }
 
-// Roster of one course: every paid (active) enrollment with its marks.
+// Roster of one course for the current teaching cycle: every paid
+// (active) enrollment whose result is not published yet, with its
+// marks. Retake students are tagged and have only the Final.
 async function roster(db, courseId) {
   const r = await db.query(`
     SELECT
       e.enrollment_id,
       e.status AS enrollment_status,
+      e.is_retake,
       e.academic_year,
       s.student_id,
       s.registration_no,
@@ -86,14 +103,19 @@ async function roster(db, courseId) {
       m.semester_final,
       m.total,
       m.updated_at,
-      cr.enrollment_id IS NOT NULL AS locked
+      (CASE WHEN e.is_retake
+        THEN m.semester_final IS NOT NULL
+        ELSE m.total IS NOT NULL
+      END) IS TRUE AS complete,
+      FALSE AS locked
     FROM enrollment e
     JOIN student s ON s.student_id=e.student_id
     LEFT JOIN course_mark m ON m.enrollment_id=e.enrollment_id
     LEFT JOIN course_result cr ON cr.enrollment_id=e.enrollment_id
     WHERE e.course_id=$1
       AND e.status IN ('enrolled','completed')
-    ORDER BY s.registration_no
+      AND cr.enrollment_id IS NULL
+    ORDER BY e.is_retake, s.registration_no
   `, [courseId]);
 
   return r.rows;
@@ -107,6 +129,7 @@ async function saveRows(db, courseId, facultyId, rows) {
     SELECT
       e.enrollment_id,
       e.status,
+      e.is_retake,
       s.registration_no,
       cr.enrollment_id IS NOT NULL AS locked
     FROM enrollment e
@@ -138,6 +161,11 @@ async function saveRows(db, courseId, facultyId, rows) {
       !e.locked,
       `The result for student ${e.registration_no} is already published; marks are locked`,
       409
+    );
+
+    check(
+      !e.is_retake || RETAKE_ONLY_FINAL.every(k => row[k] === null),
+      `Student ${e.registration_no} is a retake student: only the Final exam mark (out of 70) can be entered`
     );
   }
 

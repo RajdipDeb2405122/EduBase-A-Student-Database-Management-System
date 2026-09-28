@@ -255,6 +255,29 @@ const StudentDashboard = () => {
     }
   }
 
+  // Adds a failed course as a Retake to the current term; the fee is
+  // then paid like any other course.
+  const handleRetake = async course => {
+    if (registering) return
+
+    setRegistering(true)
+    setMessage('')
+    setError('')
+
+    try {
+      const { data } = await api.post(
+        `/student-auth/me/${studentId}/retakes/${course.course_id}`
+      )
+
+      setMessage(data.message)
+      await Promise.all([loadProfile(), loadTerm()])
+    } catch (error) {
+      setError(error.message)
+    } finally {
+      setRegistering(false)
+    }
+  }
+
   const openPayment = enrollment => {
     setPaymentError('')
     setSelectedPayment(enrollment)
@@ -536,6 +559,14 @@ const StudentDashboard = () => {
                             {enrollment.course_code}
                             {' — '}
                             {enrollment.course_title}
+                            {enrollment.is_retake && (
+                              <>
+                                {' '}
+                                <span className="badge badge-warning">
+                                  Retake
+                                </span>
+                              </>
+                            )}
                           </td>
 
                           <td>
@@ -708,6 +739,100 @@ const StudentDashboard = () => {
               )}
             </div>
 
+            {termInfo?.retakes?.length > 0 && (
+              <div
+                className="card"
+                style={{ marginBottom: '1.5rem' }}
+              >
+                <h3>Retake courses</h3>
+
+                <p>
+                  Failed courses stay on offer as a Retake in every term
+                  until you pass them. A retake is assessed on the Final
+                  exam only (out of 70); a pass is recorded 0.50 grade
+                  point below the grade earned and replaces the failed
+                  attempt in your CGPA. The ৳1,000 course fee applies.
+                </p>
+
+                {registration?.status !== 'approved' && (
+                  <p>
+                    <span className="badge badge-secondary">
+                      Available once your Level {termInfo.level}, Term {termInfo.term} registration is approved
+                    </span>
+                  </p>
+                )}
+
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Course</th>
+                        <th>Credits</th>
+                        <th>Failed in</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {termInfo.retakes.map(course => (
+                        <tr key={course.course_id}>
+                          <td>
+                            {course.course_code}
+                            {' — '}
+                            {course.course_title}
+                            {' '}
+                            <span className="badge badge-warning">
+                              Retake
+                            </span>
+                          </td>
+
+                          <td>{course.credit_hours}</td>
+
+                          <td>
+                            Level {course.failed_level}, Term {course.failed_term}
+                            {course.failed_on_retake && ' (retake)'}
+                          </td>
+
+                          <td>
+                            {course.enrollment_status === 'pending_payment' ? (
+                              <span className="badge badge-warning">
+                                Pending Payment — pay above
+                              </span>
+                            ) : course.enrollment_status === 'enrolled' ? (
+                              <span className="badge badge-success">
+                                Enrolled (paid)
+                              </span>
+                            ) : (
+                              <span className="badge badge-secondary">
+                                Not enrolled
+                              </span>
+                            )}
+                          </td>
+
+                          <td>
+                            {!course.enrollment_id && (
+                              <button
+                                className="btn btn-sm btn-primary"
+                                disabled={
+                                  registering ||
+                                  registration?.status !== 'approved' ||
+                                  !course.active
+                                }
+                                onClick={() => handleRetake(course)}
+                              >
+                                Enroll as Retake
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <div className="card">
               <h3>My registrations</h3>
 
@@ -842,24 +967,60 @@ const StudentDashboard = () => {
 
                       <tbody>
                         {result.courses.map(course => (
-                          <tr key={course.course_code}>
+                          <tr key={`${course.course_code}-${course.is_retake}`}>
                             <td>
                               {course.course_code}
                               {' — '}
                               {course.course_title}
+                              {course.is_retake && (
+                                <>
+                                  {' '}
+                                  <span className="badge badge-warning">
+                                    Retake
+                                  </span>
+                                </>
+                              )}
+                              {course.superseded && (
+                                <div>
+                                  <small>
+                                    Replaced in the CGPA by a later retake
+                                  </small>
+                                </div>
+                              )}
                             </td>
 
                             <td>{Number(course.credit_hours).toFixed(2)}</td>
 
                             {result.components.map(component => (
                               <td key={component.key}>
-                                {Number(course[component.key])}
+                                {course[component.key] === null
+                                  ? 'N/A'
+                                  : Number(course[component.key])}
                               </td>
                             ))}
 
-                            <td>{Number(course.total)}</td>
-                            <td>{course.letter_grade}</td>
-                            <td>{Number(course.grade_point).toFixed(2)}</td>
+                            <td>
+                              {course.is_retake
+                                ? `${Number(course.total)}% of 70`
+                                : Number(course.total)}
+                            </td>
+
+                            <td>
+                              {course.letter_grade}
+                              {course.is_retake && ' (Retake)'}
+                            </td>
+
+                            <td>
+                              {Number(course.grade_point).toFixed(2)}
+                              {course.is_retake && course.letter_grade !== 'F' && (
+                                <div>
+                                  <small>
+                                    raw {course.raw_letter_grade}{' '}
+                                    {Number(course.raw_grade_point).toFixed(2)} − 0.50
+                                  </small>
+                                </div>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -872,7 +1033,9 @@ const StudentDashboard = () => {
                         {result.gpa.toFixed(2)}
                       </div>
                       <div className="stat-label">
-                        Term GPA ({result.credits} credits)
+                        Term GPA ({result.credits} credits
+                        {result.courses.some(c => c.is_retake) &&
+                          '; retakes count toward the CGPA only'})
                       </div>
                     </div>
 

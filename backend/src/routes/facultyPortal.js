@@ -8,7 +8,8 @@ const {
 
 const { profile } = require('../lib/accounts');
 const { parseRows, roster, saveRows } = require('../lib/marks');
-const { MARK_COMPONENTS } = require('../lib/grading');
+const { MARK_COMPONENTS, RETAKE_COMPONENT } = require('../lib/grading');
+const teaching = require('../lib/teaching');
 
 router.use(auth, auth.requireFaculty);
 
@@ -63,27 +64,35 @@ router.get('/dashboard', wrap(async (req, res) => {
         c.*,
         d.department_code,
         faculty_teaches(c.course_id,$1) AS is_mine,
-        (
-          SELECT count(*)::int
-          FROM course_teacher ct
-          WHERE ct.course_id=c.course_id
-        ) AS teacher_count,
-        (
-          SELECT count(*)::int
-          FROM enrollment e
-          WHERE e.course_id=c.course_id
-            AND e.status IN ('enrolled','completed')
-        ) AS student_count,
-        (
-          SELECT count(*)::int
-          FROM enrollment e
-          JOIN course_mark m ON m.enrollment_id=e.enrollment_id
-          WHERE e.course_id=c.course_id
-            AND e.status IN ('enrolled','completed')
-            AND m.total IS NOT NULL
-        ) AS marked_count
+        ct.faculty_id AS assigned_faculty_id,
+        f.full_name AS assigned_faculty_name,
+        n.student_count,
+        n.retake_count,
+        n.marked_count
       FROM course c
       JOIN department d ON d.department_id=c.department_id
+      LEFT JOIN course_teacher ct
+        ON ct.course_id=c.course_id
+       AND ct.released_at IS NULL
+      LEFT JOIN faculty_public f ON f.faculty_id=ct.faculty_id
+      -- Current teaching cycle: paid students not yet published.
+      CROSS JOIN LATERAL (
+        SELECT
+          count(*)::int AS student_count,
+          count(*) FILTER (WHERE e.is_retake)::int AS retake_count,
+          count(*) FILTER (
+            WHERE CASE WHEN e.is_retake
+              THEN m.${RETAKE_COMPONENT} IS NOT NULL
+              ELSE m.total IS NOT NULL
+            END
+          )::int AS marked_count
+        FROM enrollment e
+        LEFT JOIN course_mark m ON m.enrollment_id=e.enrollment_id
+        LEFT JOIN course_result cr ON cr.enrollment_id=e.enrollment_id
+        WHERE e.course_id=c.course_id
+          AND e.status IN ('enrolled','completed')
+          AND cr.enrollment_id IS NULL
+      ) n
       WHERE faculty_teaches(c.course_id,$1)
         OR (c.active=TRUE AND c.department_id=$2)
       ORDER BY c.level,c.term,c.course_code
@@ -143,8 +152,9 @@ router.put('/profile', wrap(async (req, res) => {
   );
 }));
 
-// Any teacher may add any active course of their own department,
-// even when other teachers already teach it.
+// A teacher may take any active course of their own department that
+// no other teacher holds for the current term (one teacher per
+// course; lib/teaching.js and the course_teacher_one_active index).
 router.post('/courses/:id', wrap(async (req, res) => {
   const courseId = id(req.params.id);
 
@@ -163,15 +173,8 @@ router.post('/courses/:id', wrap(async (req, res) => {
       409
     );
 
-    const r = await db.query(`
-      INSERT INTO course_teacher (course_id,faculty_id)
-      VALUES ($1,$2)
-      ON CONFLICT (course_id,faculty_id) DO NOTHING
-      RETURNING course_id
-    `, [courseId, req.user.faculty_id]);
-
     check(
-      r.rowCount,
+      await teaching.assign(db, courseId, req.user.faculty_id),
       'This course is already in your teaching list',
       409
     );
@@ -180,31 +183,17 @@ router.post('/courses/:id', wrap(async (req, res) => {
   res.json({ message: 'Course added to your teaching list' });
 }));
 
+// Frees the course so another teacher can take it. The assignment
+// is kept as history (released), as are all marks and results.
 router.delete('/courses/:id', wrap(async (req, res) => {
   const courseId = id(req.params.id);
-  const facultyId = req.user.faculty_id;
 
   await transaction(async db => {
-    const r = await db.query(`
-      DELETE FROM course_teacher
-      WHERE course_id=$1 AND faculty_id=$2
-      RETURNING course_id
-    `, [courseId, facultyId]);
-
-    if (!r.rowCount) {
-      // Legacy assignment recorded only on course.faculty_id.
-      const legacy = await db.query(`
-        UPDATE course SET faculty_id=NULL
-        WHERE course_id=$1 AND faculty_id=$2
-        RETURNING course_id
-      `, [courseId, facultyId]);
-
-      check(
-        legacy.rowCount,
-        'You are not assigned to this course',
-        403
-      );
-    }
+    check(
+      await teaching.release(db, courseId, 'removed', req.user.faculty_id),
+      'You are not assigned to this course',
+      403
+    );
   });
 
   res.json({
@@ -219,6 +208,7 @@ router.get('/courses/:id/marks', wrap(async (req, res) => {
   res.json({
     course,
     components: MARK_COMPONENTS,
+    retake_component: RETAKE_COMPONENT,
     students: await roster(pool, course.course_id)
   });
 }));
@@ -241,6 +231,7 @@ router.put('/courses/:id/marks', wrap(async (req, res) => {
       saved,
       course,
       components: MARK_COMPONENTS,
+      retake_component: RETAKE_COMPONENT,
       students: await roster(db, course.course_id)
     };
   });
@@ -280,7 +271,7 @@ router.get('/students/:id/progress', wrap(async (req, res) => {
   // Advisors see every course; course teachers only their own.
   const enrollments = await pool.query(`
     SELECT
-      e.enrollment_id,e.academic_year,e.term,e.status,
+      e.enrollment_id,e.academic_year,e.term,e.status,e.is_retake,
       c.course_code,c.course_title,
       m.attendance,m.class_test,m.semester_final,m.total,
       cr.letter_grade,cr.grade_point

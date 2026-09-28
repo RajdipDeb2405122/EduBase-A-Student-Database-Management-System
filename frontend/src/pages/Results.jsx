@@ -78,7 +78,9 @@ export default function Results() {
     if (!window.confirm(
       `Publish ${preview.department.department_code} ${preview.label} results for ` +
         `${count} student(s)? ${excluded} student(s) will be excluded. ` +
-        'Published marks can no longer be edited.'
+        'Published marks can no longer be edited, the term\'s teaching ' +
+        'assignments are released and published students move to the ' +
+        'next level-term.'
     )) {
       return
     }
@@ -171,7 +173,8 @@ export default function Results() {
 
         <p>
           Only students whose marks are complete (attendance, CT and
-          final) in every course of the term are published. Everyone
+          final) in every course of the term, and whose paid retakes
+          have a Final mark, are published. Everyone
           else is listed below with the reason. You can publish again
           later to add students whose marks have since been completed.
         </p>
@@ -190,7 +193,12 @@ export default function Results() {
           {outcome.students.filter(s => s.state === 'eligible').length} student(s)
           published,
           {' '}
-          {outcome.students.filter(s => s.state === 'excluded').length} excluded.
+          {outcome.students.filter(s => s.state === 'excluded').length} excluded,
+          {' '}
+          {outcome.students.filter(s => s.advanced_to).length} moved to the next
+          level-term,
+          {' '}
+          {outcome.released?.length ?? 0} teaching assignment(s) released.
         </p>
       )}
 
@@ -271,9 +279,12 @@ export default function Results() {
                           ))}
                         </ul>
                       ) : student.state === 'eligible' ? (
-                        student.courses
-                          .map(c => `${c.course_code} ${c.letter_grade}`)
-                          .join(', ')
+                        [
+                          ...student.courses
+                            .map(c => `${c.course_code} ${c.letter_grade}`),
+                          ...student.retakes
+                            .map(c => `${c.course_code} ${c.letter_grade} (Retake)`)
+                        ].join(', ')
                       ) : (
                         'Already published'
                       )}
